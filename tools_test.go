@@ -217,6 +217,38 @@ func TestSendEmail_BadBase64Attachment(t *testing.T) {
 	}
 }
 
+func TestSendEmail_AttachmentsWrongType(t *testing.T) {
+	env, _ := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":          "a@x.com",
+		"subject":     "s",
+		"body":        "hi",
+		"attachments": "not-a-list",
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for non-array attachments")
+	}
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "attachments") {
+		t.Errorf("error should name attachments: %q", msg)
+	}
+}
+
+func TestSendEmail_BodyTypeWrongType(t *testing.T) {
+	env, _ := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":        "a@x.com",
+		"subject":   "s",
+		"body":      "hi",
+		"body_type": 7,
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for non-string body_type")
+	}
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "body_type") {
+		t.Errorf("error should name body_type: %q", msg)
+	}
+}
+
 func TestSendEmail_AttachmentTooBig(t *testing.T) {
 	env, _ := newToolEnv(t)
 	env.Config.MaxAttachmentMB = 1
