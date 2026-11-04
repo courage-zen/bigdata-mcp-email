@@ -161,6 +161,31 @@ max_attachment_mb: 10      # 可选
 - 仓库：`courage-zen/bigdata-mcp-email`
 - Dockerfile 对齐 forwarder：多阶段构建（golang:alpine 编译 → alpine 运行，非 root）
 
+## 部署形态（与 local-smtp-forwarder 的关系）
+
+**代码仓库分离，部署时同一 k8s pod 双容器（sidecar 模式）。** 决策依据：
+
+- forwarder 已在服务 multica 生态的多个调用方，是有独立价值的通用工具，
+  保持独立仓库和独立发布节奏，不与 email-mcp 合并
+- 同 pod 双容器共享网络命名空间，email-mcp 连 `127.0.0.1:2525` 天然可达，
+  设计中的 smtp 配置（host/port）无需任何调整
+- 凭证隔离：上游 SMTP 密码只在 forwarder 容器内，`MCP_AUTH_KEY` 只在
+  email-mcp 容器内，互相不可见
+- forwarder 的 2525 端口随之从节点级监听收窄为 pod 内监听，安全面更小
+
+```yaml
+# pod 布局示意
+containers:
+  - name: email-mcp            # 暴露 8000，对外提供 MCP 服务
+    env: [MCP_AUTH_KEY, ...]
+  - name: forwarder            # 2525 仅 pod 内可达
+    env: [MAILER_UPSTREAM_*]   # SMTP 凭证只在这里
+```
+
+演进选项（本期不做）：若将来想省掉 loopback SMTP 一跳，可让 forwarder 把
+relay 逻辑提炼成可导入的 Go 包，email-mcp 通过 go module 引用后单二进制
+运行——但这需要动 forwarder 仓库并管理跨仓库依赖，当前收益不抵成本。
+
 ## 未来扩展（本期不做）
 
 - **From 显示名**：`From: "数据助手（来自 AIOps 工作区）" <noreply@x.com>`。
