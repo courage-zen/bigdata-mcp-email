@@ -54,13 +54,60 @@ func contentTypeByExt(name string) string {
 
 var nonASCII = regexp.MustCompile(`[^\x20-\x7E]`)
 
-// encodeRFC2047 encodes s as an RFC 2047 B-encoded word when it contains
-// non-ASCII bytes, otherwise returns it unchanged.
+// tokenChar matches a full run of RFC 2045 token characters (alphanumerics
+// plus "!#$%&'*+-^_`|~" and "."), and nothing else.
+var tokenChar = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)
+
+// contentTypeValid reports whether ct is a strict "type/subtype" pair of
+// RFC 2045 tokens — no parameters, no whitespace, no CR/LF.
+func contentTypeValid(ct string) bool {
+	slash := strings.IndexByte(ct, '/')
+	if slash <= 0 || slash == len(ct)-1 {
+		return false
+	}
+	return tokenChar.MatchString(ct[:slash]) && tokenChar.MatchString(ct[slash+1:])
+}
+
+// validFilename rejects filenames containing control characters, quotes, or
+// backslashes: any of these can break out of the quoted-string in the
+// Content-Disposition header.
+func validFilename(name string) bool {
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c < 0x20 || c == 0x7F || c == '"' || c == '\\' {
+			return false
+		}
+	}
+	return true
+}
+
+// encodeRFC2047 encodes s as RFC 2047 B-encoded words when it contains
+// non-ASCII bytes, otherwise returns it unchanged. Long inputs are split at
+// rune boundaries into <=45-byte chunks (45 source bytes -> <=60 base64
+// chars -> <=72-char encoded word) so each word stays short; words are
+// separated by a single space, which is exactly what RFC 2047 requires
+// between adjacent encoded words and what header unfolding restores.
 func encodeRFC2047(s string) string {
 	if !nonASCII.MatchString(s) {
 		return s
 	}
-	return "=?utf-8?B?" + base64.StdEncoding.EncodeToString([]byte(s)) + "?="
+	var words []string
+	for remaining := s; remaining != ""; {
+		chunk := remaining
+		if len(chunk) > 45 {
+			chunk = chunk[:45]
+			// Back off so the byte after the chunk starts a new rune; never
+			// split a multi-byte rune. Three steps is the most a valid UTF-8
+			// sequence needs, and the cap keeps pathological invalid UTF-8
+			// from stalling the loop.
+			for i := 0; i < 3 && remaining[len(chunk)]&0xC0 == 0x80; i++ {
+				chunk = chunk[:len(chunk)-1]
+			}
+		}
+		words = append(words, "=?utf-8?B?"+base64.StdEncoding.EncodeToString([]byte(chunk))+"?=")
+		remaining = remaining[len(chunk):]
+	}
+	return strings.Join(words, " ")
 }
 
 // foldHeader inserts CRLF+space soft breaks so no header line exceeds 998
@@ -104,15 +151,55 @@ func normalizeCRLF(s string) string {
 	return strings.ReplaceAll(s, "\n", "\r\n")
 }
 
-// wrapBody folds body lines longer than 998 chars.
-func wrapBody(s string) string {
-	lines := strings.Split(s, "\r\n")
-	for i, line := range lines {
-		if len(line) > 998 {
-			lines[i] = foldHeader(line)
+// encodeQuotedPrintable encodes s per RFC 2045 §6.7: bytes 33-126 pass
+// through except "=", controls/high bytes and "=" become "=XX" (uppercase
+// hex), and lines are capped at 76 chars with "=\r\n" soft breaks. Space and
+// tab are literal unless they would end a line, where they become =20/=09 so
+// trailing whitespace survives transport.
+func encodeQuotedPrintable(s string) string {
+	s = normalizeCRLF(s)
+	var b strings.Builder
+	lineLen := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		// Hard line breaks pass through and reset the line length.
+		if c == '\n' {
+			b.WriteString("\r\n")
+			lineLen = 0
+			continue
 		}
+		if c == '\r' {
+			continue // CRLF pairs are re-emitted with the '\n' above
+		}
+		var enc string
+		switch {
+		case c == ' ' || c == '\t':
+			// Literal unless it would end a line — then encode it so the
+			// trailing whitespace survives transport (RFC 2045 §6.7(3)).
+			// i+1 >= len(s) means end of input, which is also a line end.
+			if i+1 >= len(s) || s[i+1] == '\n' || s[i+1] == '\r' {
+				enc = fmt.Sprintf("=%02X", c)
+			} else {
+				enc = string(c)
+			}
+		case c >= 33 && c <= 126 && c != '=':
+			enc = string(c)
+		default:
+			enc = fmt.Sprintf("=%02X", c)
+		}
+		// Soft-break before writing enc when it would push the line past 72
+		// chars: content caps at 72, and the trailing "=\r\n" of a soft break
+		// keeps every line at 75 chars, under the 76-char QP limit (RFC 2045
+		// §6.7(5)). Hard breaks bypass this, so a soft break never lands
+		// directly before a hard break.
+		if lineLen+len(enc) > 72 {
+			b.WriteString("=\r\n")
+			lineLen = 0
+		}
+		b.WriteString(enc)
+		lineLen += len(enc)
 	}
-	return strings.Join(lines, "\r\n")
+	return b.String()
 }
 
 // newBoundary generates a random multipart boundary.
@@ -151,6 +238,19 @@ func BuildMessage(e Email) ([]byte, error) {
 		return nil, fmt.Errorf("body_type must be \"text\" or \"html\", got %q", e.BodyType)
 	}
 
+	// CRLF in an address header is a header-injection vector: reject it
+	// outright. Subject is exempt because B-encoding makes it safe.
+	recipients := append([]string{e.From}, e.To...)
+	recipients = append(recipients, e.Cc...)
+	if e.ReplyTo != "" {
+		recipients = append(recipients, e.ReplyTo)
+	}
+	for _, addr := range recipients {
+		if strings.ContainsAny(addr, "\r\n\x00") {
+			return nil, fmt.Errorf("header value %q contains control characters", addr)
+		}
+	}
+
 	var h strings.Builder
 	h.WriteString("From: " + e.From + "\r\n")
 	h.WriteString("To: " + strings.Join(e.To, ", ") + "\r\n")
@@ -169,13 +269,13 @@ func BuildMessage(e Email) ([]byte, error) {
 	if e.BodyType == "html" {
 		textCT = "text/html; charset=UTF-8"
 	}
-	body := wrapBody(normalizeCRLF(e.Body))
+	body := encodeQuotedPrintable(e.Body)
 
 	var out strings.Builder
 	if len(e.Attachments) == 0 {
 		out.WriteString(h.String())
 		out.WriteString("Content-Type: " + textCT + "\r\n")
-		out.WriteString("Content-Transfer-Encoding: 8bit\r\n")
+		out.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
 		out.WriteString("\r\n")
 		out.WriteString(body)
 		return []byte(out.String()), nil
@@ -190,16 +290,22 @@ func BuildMessage(e Email) ([]byte, error) {
 	// Text part.
 	out.WriteString("--" + boundary + "\r\n")
 	out.WriteString("Content-Type: " + textCT + "\r\n")
-	out.WriteString("Content-Transfer-Encoding: 8bit\r\n")
+	out.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
 	out.WriteString("\r\n")
 	out.WriteString(body)
 	out.WriteString("\r\n")
 
 	// Attachment parts.
 	for _, a := range e.Attachments {
+		if !validFilename(a.Filename) {
+			return nil, fmt.Errorf("attachment filename %q contains forbidden characters (control characters, quotes, or backslashes)", a.Filename)
+		}
 		ct := a.ContentType
 		if ct == "" {
 			ct = contentTypeByExt(a.Filename)
+		}
+		if !contentTypeValid(ct) {
+			return nil, fmt.Errorf("attachment %q has invalid content type %q", a.Filename, ct)
 		}
 		out.WriteString("--" + boundary + "\r\n")
 		out.WriteString("Content-Type: " + ct + "\r\n")
