@@ -16,6 +16,7 @@ type Email struct {
 	Cc          []string
 	ReplyTo     string // empty = no Reply-To header
 	Subject     string
+	MessageID   string // pre-generated; BuildMessage writes it and falls back to generating one
 	Body        string
 	BodyType    string // "text" | "html"
 	Attachments []Attachment
@@ -262,7 +263,10 @@ func BuildMessage(e Email) ([]byte, error) {
 	}
 	h.WriteString("Subject: " + foldHeader(encodeRFC2047(e.Subject)) + "\r\n")
 	h.WriteString("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n")
-	h.WriteString("Message-ID: " + newMessageID(e.From) + "\r\n")
+	if e.MessageID == "" {
+		e.MessageID = newMessageID(e.From)
+	}
+	h.WriteString("Message-ID: " + e.MessageID + "\r\n")
 	h.WriteString("MIME-Version: 1.0\r\n")
 
 	textCT := "text/plain; charset=UTF-8"
