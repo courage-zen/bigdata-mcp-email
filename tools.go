@@ -128,7 +128,14 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	if body == "" {
 		return fail("parameter \"body\" is required")
 	}
-	bodyType, _ := args["body_type"].(string)
+	bodyType := ""
+	if v, present := args["body_type"]; present && v != nil {
+		s, ok := v.(string)
+		if !ok {
+			return fail("parameter \"body_type\" must be a string, got %T", v)
+		}
+		bodyType = s
+	}
 	if bodyType == "" {
 		bodyType = "text"
 	}
@@ -164,7 +171,11 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 
 	// --- attachments ---------------------------------------------------------
 	var attachments []Attachment
-	if rawList, ok := args["attachments"].([]any); ok {
+	if v, present := args["attachments"]; present && v != nil {
+		rawList, ok := v.([]any)
+		if !ok {
+			return fail("parameter \"attachments\" must be an array of objects, got %T", v)
+		}
 		for i, raw := range rawList {
 			m, ok := raw.(map[string]any)
 			if !ok {
