@@ -55,5 +55,8 @@ func (s *SMTPSender) Send(from string, to []string, msg []byte) error {
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("finish DATA: %w", err)
 	}
-	return c.Quit()
+	if err := c.Quit(); err != nil {
+		return fmt.Errorf("quit: %w", err)
+	}
+	return nil
 }

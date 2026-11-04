@@ -48,17 +48,20 @@ func (s *fakeSMTPServer) serve() {
 	write := func(line string) { _, _ = conn.Write([]byte(line + "\r\n")) }
 	write("220 fake ESMTP")
 
-	readLine := func() string {
+	readLine := func() (string, bool) {
 		line, err := r.ReadString('\n')
-		if err != nil {
-			return ""
+		if err != nil && line == "" {
+			return "", false
 		}
-		return strings.TrimRight(line, "\r\n")
+		return strings.TrimRight(line, "\r\n"), true
 	}
 	inData := false
 	var data bytes.Buffer
 	for {
-		line := readLine()
+		line, ok := readLine()
+		if !ok {
+			break // EOF or read error: stop instead of treating it as a blank DATA line.
+		}
 		if line == "" && !inData {
 			break
 		}
@@ -93,8 +96,13 @@ func (s *fakeSMTPServer) serve() {
 			s.MailFrom = strings.Trim(rest, "<>")
 			write("250 OK")
 		case strings.HasPrefix(upper, "RCPT TO:"):
-			rcpt := strings.Trim(strings.TrimSuffix(strings.TrimPrefix(line, "RCPT TO:"), ">"), " <>")
-			s.RcptTo = append(s.RcptTo, rcpt)
+			// Same bracket-extraction as MAIL FROM: robust to trailing
+			// extension parameters if a future client adds any.
+			rest := strings.TrimPrefix(line, "RCPT TO:")
+			if i := strings.IndexByte(rest, '>'); i >= 0 {
+				rest = rest[:i+1]
+			}
+			s.RcptTo = append(s.RcptTo, strings.Trim(rest, "<>"))
 			write("250 OK")
 		case upper == "DATA":
 			write("354 go ahead")
@@ -136,6 +144,9 @@ func TestSenderSend_Plain(t *testing.T) {
 	}
 	if !bytes.Contains(srv.Data, []byte("Subject: s")) {
 		t.Errorf("DATA lost subject:\n%s", srv.Data)
+	}
+	if !bytes.Contains(srv.Data, []byte("hello\n")) {
+		t.Errorf("DATA lost body:\n%s", srv.Data)
 	}
 }
 
@@ -180,5 +191,52 @@ func TestSenderSend_Unreachable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "dial") {
 		t.Errorf("error should mention dial stage: %v", err)
+	}
+}
+
+// TestFakeSMTPServer_MidDataHangup guards the readLine EOF/blank-line fix: a
+// client that hangs up mid-DATA must terminate the serve goroutine, not spin.
+// This test connects directly, not through SMTPSender.
+func TestFakeSMTPServer_MidDataHangup(t *testing.T) {
+	srv := newFakeSMTPServer(t)
+	conn, err := net.Dial("tcp", srv.addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rd := bufio.NewReader(conn)
+	if _, err := rd.ReadString('\n'); err != nil { // greeting
+		t.Fatal(err)
+	}
+	type smtpCmd struct {
+		cmd      string
+		response int
+	}
+	for _, c := range []smtpCmd{ // ordered: SMTP commands must be sent in order
+		{"EHLO t\r\n", 2}, // EHLO has two response lines
+		{"MAIL FROM:<noreply@example.com>\r\n", 1},
+		{"RCPT TO:<a@x.com>\r\n", 1},
+		{"DATA\r\n", 1},
+	} {
+		if _, err := conn.Write([]byte(c.cmd)); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < c.response; i++ {
+			if _, err := rd.ReadString('\n'); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := conn.Write([]byte("partial body line without terminator\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	conn.Close() // hang up mid-DATA
+
+	select {
+	case err := <-srv.ErrCh:
+		if err != nil {
+			t.Fatalf("fake server: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("serve goroutine did not terminate after mid-DATA hangup (busy loop?)")
 	}
 }
