@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"io"
 	"net"
 	"net/http"
@@ -151,5 +152,24 @@ func TestServer_FullStackWithFakeSMTP(t *testing.T) {
 	}
 	if !bytes.Contains(srv.Data, []byte("Subject: s")) {
 		t.Errorf("DATA:\n%s", srv.Data)
+	}
+}
+
+func TestServer_LargeAttachmentUnderConfigLimit(t *testing.T) {
+	fs := &fakeSender{}
+	ts := httptest.NewServer(newTestHTTPServer(t, "", fs))
+	defer ts.Close()
+
+	// 5 MiB decoded ≈ 6.7 MiB base64 — over the SDK's 4 MiB default body
+	// cap, under the 10 MiB config limit. Pins that the transport cap is
+	// derived from max_attachment_mb.
+	content := base64.StdEncoding.EncodeToString(make([]byte, 5<<20))
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send-email","arguments":{"subject":"s","body":"hi","to":["a@x.com"],"attachments":[{"filename":"big.bin","content_b64":"` + content + `"}]}}}`
+	status, resp := mcpCall(t, ts.URL, nil, body)
+	if status != 200 {
+		t.Fatalf("status = %d (transport body cap not raised?): %.200s", status, resp)
+	}
+	if !strings.Contains(resp, `"success":true`) {
+		t.Fatalf("no success: %.200s", resp)
 	}
 }

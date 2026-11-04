@@ -22,16 +22,26 @@ func NewHandler(env *ServerEnv, authKeys string) http.Handler {
 		Name:        "send-email",
 		Description: "Send an email via the configured SMTP relay. If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in any) (*mcp.CallToolResult, any, error) {
+		var hdr map[string][]string
+		if req.Extra != nil && req.Extra.Header != nil {
+			hdr = req.Extra.Header
+		}
+		mc := MulticaContextFromHeaders(hdr)
 		// Normalize raw arguments (to/cc may be string or array).
 		var args map[string]any
 		if len(req.Params.Arguments) > 0 {
 			if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: `{"success":false,"error":"invalid arguments: ` + err.Error() + `"}`}}}, nil, nil
+				// Defense in depth: the SDK's schema validation (In = any →
+				// {"type":"object"}) rejects non-object arguments before the
+				// handler runs, so this is normally unreachable — but keep it
+				// correct rather than malformed.
+				payload := errPayload("invalid arguments: "+err.Error(), mc)
+				return &mcp.CallToolResult{
+					IsError:           true,
+					Content:           []mcp.Content{&mcp.TextContent{Text: string(payload)}},
+					StructuredContent: json.RawMessage(payload),
+				}, nil, nil
 			}
-		}
-		var hdr map[string][]string
-		if req.Extra != nil && req.Extra.Header != nil {
-			hdr = req.Extra.Header
 		}
 		payload, err := env.SendEmail(hdr, args)
 		if err != nil {
@@ -51,7 +61,16 @@ func NewHandler(env *ServerEnv, authKeys string) http.Handler {
 
 	mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcp.Server { return server },
-		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
+		&mcp.StreamableHTTPOptions{
+			Stateless:    true,
+			JSONResponse: true,
+			// Base64 inflates attachments 4/3; without this the SDK's 4 MiB
+			// default caps decoded attachments at ~3 MiB, silently defeating
+			// max_attachment_mb. +2 MiB covers the JSON envelope and gives
+			// slightly-over-limit attachments room to reach the tool's
+			// friendly size error instead of a bare 413.
+			MaxRequestBodyBytes: int64(env.Config.MaxAttachmentMB)*4*1024*1024/3 + 2<<20,
+		},
 	))
 
 	return bearerAuth(authKeys, mux)
