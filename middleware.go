@@ -7,7 +7,10 @@ import (
 )
 
 // bearerAuth validates Authorization: Bearer <key> against a comma-separated
-// key set. An empty key set disables auth (local dev). /health is exempt.
+// key set. Only the exactly-empty key string disables auth (local dev).
+// A non-empty string that yields no usable keys (whitespace-only, commas
+// only) fails closed: every request 401s instead of silently disabling auth.
+// /health is exempt.
 func bearerAuth(keys string, next http.Handler) http.Handler {
 	allowed := map[string]bool{}
 	for _, k := range strings.Split(keys, ",") {
@@ -15,8 +18,9 @@ func bearerAuth(keys string, next http.Handler) http.Handler {
 			allowed[k] = true
 		}
 	}
+	authDisabled := keys == ""
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(allowed) == 0 || r.URL.Path == "/health" {
+		if authDisabled || r.URL.Path == "/health" {
 			next.ServeHTTP(w, r)
 			return
 		}

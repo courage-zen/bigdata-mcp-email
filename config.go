@@ -96,5 +96,8 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.SMTP.From == "" {
 		return nil, fmt.Errorf("smtp.from (or SMTP_FROM) is required: the envelope sender address")
 	}
+	if cfg.MaxAttachmentMB < 1 {
+		return nil, fmt.Errorf("max_attachment_mb (or MAX_ATTACHMENT_MB) must be >= 1 MiB, got %d", cfg.MaxAttachmentMB)
+	}
 	return cfg, nil
 }

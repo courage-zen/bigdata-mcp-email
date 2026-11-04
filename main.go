@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 )
 
 func main() {
@@ -29,5 +30,14 @@ func main() {
 	env := &ServerEnv{Config: cfg, Sender: &SMTPSender{Host: cfg.SMTP.Host, Port: cfg.SMTP.Port}}
 	addr := host + ":" + strconv.Itoa(port)
 	log.Printf("email-mcp listening on %s (smtp %s:%d, from %s)", addr, cfg.SMTP.Host, cfg.SMTP.Port, cfg.SMTP.From)
-	log.Fatal(http.ListenAndServe(addr, NewHandler(env, authKeys)))
+	// ReadHeaderTimeout is the slowloris guard: the server binds 0.0.0.0 by
+	// default, so slow-header clients must not be able to pin connections
+	// open forever. Everything else is deliberately the zero value, matching
+	// ListenAndServe's behavior.
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           NewHandler(env, authKeys),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
