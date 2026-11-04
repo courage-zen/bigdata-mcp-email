@@ -165,6 +165,11 @@ max_attachment_mb: 10      # 可选
 
 **代码仓库分离，部署时同一 k8s pod 双容器（sidecar 模式）。** 决策依据：
 
+- 依赖关系只到协议层：email-mcp 对下游的全部依赖是"一个 SMTP 服务器"
+  （明文提交、无认证），forwarder 只是这个依赖当前的提供方。将来指向
+  任何接受明文提交的 SMTP 端点都是纯配置变更（SMTP_HOST/SMTP_PORT）；
+  若要直连需要 STARTTLS/AUTH 的真实邮件服务器，只需给 sender.go 增加
+  TLS/AUTH 支持——受控的局部升级，不影响工具层与 MIME 层
 - forwarder 已在服务 multica 生态的多个调用方，是有独立价值的通用工具，
   保持独立仓库和独立发布节奏，不与 email-mcp 合并
 - 同 pod 双容器共享网络命名空间，email-mcp 连 `127.0.0.1:2525` 天然可达，
@@ -184,7 +189,8 @@ containers:
 
 演进选项（本期不做）：若将来想省掉 loopback SMTP 一跳，可让 forwarder 把
 relay 逻辑提炼成可导入的 Go 包，email-mcp 通过 go module 引用后单二进制
-运行——但这需要动 forwarder 仓库并管理跨仓库依赖，当前收益不抵成本。
+运行——但这会把协议级依赖变成代码级依赖，需要动 forwarder 仓库并管理
+跨仓库依赖，与"依赖只到协议层"的原则相悖，当前收益不抵成本。
 
 ## 未来扩展（本期不做）
 
