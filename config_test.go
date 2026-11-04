@@ -87,3 +87,23 @@ smtp:
 		t.Fatal("expected error when smtp.from is missing and SMTP_FROM unset")
 	}
 }
+
+func TestLoadConfig_AttachmentCapTooSmall(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+max_attachment_mb: -5
+`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for negative max_attachment_mb")
+	}
+
+	path = writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	t.Setenv("MAX_ATTACHMENT_MB", "0")
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for zero MAX_ATTACHMENT_MB (would disable the transport body cap)")
+	}
+}

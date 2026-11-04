@@ -70,6 +70,9 @@ func TestServer_AuthRequired(t *testing.T) {
 	if status != 401 {
 		t.Fatalf("status = %d, want 401: %s", status, body)
 	}
+	if !strings.Contains(body, "unauthorized") {
+		t.Fatalf("401 body shape: %s", body)
+	}
 
 	status, body = mcpCall(t, ts.URL, map[string]string{"Authorization": "Bearer wrong"}, callBody)
 	if status != 401 {
@@ -82,6 +85,20 @@ func TestServer_AuthRequired(t *testing.T) {
 	}
 	if !strings.Contains(body, `"success":true`) {
 		t.Fatalf("no success: %s", body)
+	}
+}
+
+// TestServer_WhitespaceKeyFailsClosed pins the whitespace-only MCP_AUTH_KEY
+// behavior: " " splits to zero usable keys, and zero usable keys from a
+// non-empty setting must NOT silently disable auth.
+func TestServer_WhitespaceKeyFailsClosed(t *testing.T) {
+	fs := &fakeSender{}
+	ts := httptest.NewServer(newTestHTTPServer(t, "  ", fs))
+	defer ts.Close()
+
+	status, body := mcpCall(t, ts.URL, nil, callBody)
+	if status != 401 {
+		t.Fatalf("status = %d, want 401 (auth must fail closed): %s", status, body)
 	}
 }
 
