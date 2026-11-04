@@ -17,7 +17,7 @@ Download a self-contained binary from [Releases](https://github.com/courage-zen/
 
 ```sh
 tar -xzf email-mcp-linux-arm64.tar.gz   # or email-mcp-linux-amd64.tar.gz
-MCP_AUTH_KEY=your-key ./email-mcp
+MCP_AUTH_KEY=your-key SMTP_FROM=you@example.com ./email-mcp
 ```
 
 Or run from source:
@@ -27,6 +27,13 @@ make build
 cp config.example.yaml config.yaml   # edit smtp.from
 make run
 make test
+```
+
+Or run in Docker:
+
+```sh
+docker build -t email-mcp .
+docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=noreply@example.com email-mcp
 ```
 
 ## Configure
@@ -44,7 +51,8 @@ max_attachment_mb: 10   # optional
 Environment variables override the file: `SMTP_HOST` `SMTP_PORT` `SMTP_FROM`
 `MAX_ATTACHMENT_MB`. Server env: `MCP_AUTH_KEY` (comma-separated bearer keys;
 unset = no auth), `MCP_HOST` (default 0.0.0.0), `MCP_PORT` (default 8000).
-`/health` is exempt from auth.
+`/health` is exempt from auth. `smtp.from` (or `SMTP_FROM`) is required — the
+server exits at startup without it.
 
 ## Multica wiring
 
@@ -79,7 +87,8 @@ The proxy injects the `X-Multica-*` identity headers automatically.
 | `attachments` | array | `{filename, content_b64, content_type?}` |
 
 Returns JSON: `success`, `message_id`, `to`, `cc`, `from`, `reply_to`,
-`attachment_count`, `duration_ms`, `multica_context`.
+`attachment_count`, `duration_ms`, `multica_context`; `error` is present on
+failure (omitted on success).
 
 ## Deployment (k8s sidecar)
 

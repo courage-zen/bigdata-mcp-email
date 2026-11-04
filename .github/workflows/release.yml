@@ -45,7 +45,7 @@ jobs:
       - name: Smoke test (amd64 only)
         if: matrix.arch == 'amd64'
         run: |
-          MCP_AUTH_KEY=smoke-key MCP_PORT=8123 SMTP_FROM=smoke@example.com ./email-mcp > server.log 2>&1 &
+          MCP_AUTH_KEY=smoke-key MCP_PORT=8123 SMTP_FROM=smtp@example.com ./email-mcp > server.log 2>&1 &
           server_pid=$!
           for i in $(seq 1 30); do
             curl -s -o /dev/null -X POST http://127.0.0.1:8123/mcp \
@@ -60,9 +60,9 @@ jobs:
             -H "Authorization: Bearer smoke-key" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json, text/event-stream" \
-            -H "X-Multica-User-Email: smoke@example.com" \
+            -H "X-Multica-User-Email: smoke-user@example.com" \
             -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"send-email","arguments":{"subject":"smoke","body":"hi"}},"id":2}')"
-          echo "${response}" | grep -q "smoke@example.com" || {
+          echo "${response}" | grep -q "smoke-user@example.com" || {
             echo "multica_context missing from tool response"; cat server.log; exit 1;
           }
           kill "${server_pid}" || true
