@@ -17,14 +17,14 @@ func TestAppendAgentSignature(t *testing.T) {
 			body:     "hi",
 			bodyType: "text",
 			mc:       both,
-			want:     "hi\n\n--\nMultica 智能体：Bob\n工作区：Acme",
+			want:     "hi\n\n--\n智能体：Bob\n工作区：Acme",
 		},
 		{
 			name:     "html body, both names",
 			body:     "<p>hi</p>",
 			bodyType: "html",
 			mc:       both,
-			want:     "<p>hi</p>\n<br>--<br>\nMultica 智能体：Bob\n<br>工作区：Acme\n<br>",
+			want:     "<p>hi</p>\n<br>--<br>\n智能体：Bob\n<br>工作区：Acme\n<br>",
 		},
 		{
 			name:     "text body, missing workspace_name",

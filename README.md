@@ -111,7 +111,7 @@ non-empty value, this block is appended to the end of the body:
 
 ```text
 --
-Multica 智能体：{agent_name}
+智能体：{agent_name}
 工作区：{workspace_name}
 ```
 
