@@ -17,7 +17,7 @@ func NewHandler(env *ServerEnv, authKeys string) http.Handler {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.0.2"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.1.0"}, nil)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "send-email",
 		Description: "Send an email via the configured SMTP relay. If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails.",
