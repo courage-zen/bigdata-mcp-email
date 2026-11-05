@@ -380,3 +380,140 @@ func TestSendEmail_SignatureHtmlBody(t *testing.T) {
 		t.Errorf("html signature separator not found:\n%s", fs.Msg)
 	}
 }
+
+// allowlistEnv returns a tool env with the allowlist active.
+func allowlistEnv(t *testing.T, domains ...string) (*ServerEnv, *fakeSender) {
+	t.Helper()
+	env, fs := newToolEnv(t)
+	env.Config.AllowedDomains = domains
+	set := make(map[string]struct{}, len(domains))
+	for _, d := range domains {
+		set[d] = struct{}{}
+	}
+	env.Config.allowedDomainSet = set
+	return env, fs
+}
+
+func TestSendEmail_DomainAllowlist_BlockedTo(t *testing.T) {
+	env, fs := allowlistEnv(t, "example.com", "acme.org")
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@example.com")
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"to":      []any{"a@evil.com"},
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != false {
+		t.Fatalf("success = %v, want false (out-of-list to must be rejected)", out["success"])
+	}
+	errMsg, _ := out["error"].(string)
+	if !strings.Contains(errMsg, "a@evil.com") {
+		t.Errorf("error must name the rejected address, got: %q", errMsg)
+	}
+	if !strings.Contains(errMsg, "example.com") || !strings.Contains(errMsg, "acme.org") {
+		t.Errorf("error must list configured domains, got: %q", errMsg)
+	}
+	if fs.To != nil || fs.Msg != nil {
+		t.Errorf("nothing must be sent when rejected (to=%v, msg set=%v)", fs.To, fs.Msg != nil)
+	}
+}
+
+func TestSendEmail_DomainAllowlist_BlockedCc(t *testing.T) {
+	env, _ := allowlistEnv(t, "example.com")
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@example.com")
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"to":      []any{"a@example.com"},
+		"cc":      []any{"b@evil.com"},
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != false {
+		t.Fatalf("success = %v, want false (out-of-list cc must be rejected)", out["success"])
+	}
+	errMsg, _ := out["error"].(string)
+	if !strings.Contains(errMsg, "b@evil.com") {
+		t.Errorf("error must name the rejected cc address, got: %q", errMsg)
+	}
+}
+
+func TestSendEmail_DomainAllowlist_BlockedFallback(t *testing.T) {
+	env, _ := allowlistEnv(t, "example.com")
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@outside.com") // to empty → fallback blocked
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != false {
+		t.Fatalf("success = %v, want false (out-of-list fallback user_email must be rejected)", out["success"])
+	}
+	errMsg, _ := out["error"].(string)
+	if !strings.Contains(errMsg, "user@outside.com") {
+		t.Errorf("error must name the rejected fallback address, got: %q", errMsg)
+	}
+}
+
+func TestSendEmail_DomainAllowlist_MixedBlocked(t *testing.T) {
+	env, fs := allowlistEnv(t, "example.com")
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@example.com")
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"to":      []any{"a@example.com", "b@evil.com", "c@example.com"},
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != false {
+		t.Fatalf("success = %v, want false (any out-of-list recipient rejects the whole call)", out["success"])
+	}
+	errMsg, _ := out["error"].(string)
+	if !strings.Contains(errMsg, "b@evil.com") {
+		t.Errorf("error must name the rejected address, got: %q", errMsg)
+	}
+	if fs.To != nil || fs.Msg != nil {
+		t.Errorf("nothing must be sent when rejected (to=%v, msg set=%v)", fs.To, fs.Msg != nil)
+	}
+}
+
+func TestSendEmail_DomainAllowlist_AllAllowed(t *testing.T) {
+	env, fs := allowlistEnv(t, "example.com", "acme.org")
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@example.com")
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"to":      []any{"a@example.com", "b@ACME.org"},
+		"cc":      []any{"c@acme.org"},
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	// fakeSender.Send receives the combined envelope recipient slice (to+cc
+	// merged by the tool before Send); there is no separate Cc field.
+	if len(fs.To) != 3 || fs.To[0] != "a@example.com" || fs.To[1] != "b@ACME.org" || fs.To[2] != "c@acme.org" {
+		t.Errorf("envelope recipients = %v", fs.To)
+	}
+}
+
+func TestSendEmail_DomainAllowlist_Inactive(t *testing.T) {
+	env, fs := newToolEnv(t) // no AllowedDomains configured → inactive
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@example.com")
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"to":      []any{"a@anywhere.com"},
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v (inactive allowlist must not restrict), err: %v", out["success"], out["error"])
+	}
+	if len(fs.To) != 1 || fs.To[0] != "a@anywhere.com" {
+		t.Errorf("envelope to = %v", fs.To)
+	}
+}

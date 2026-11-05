@@ -170,6 +170,21 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 		}
 	}
 
+	// --- recipient domain allowlist ------------------------------------------
+	if set := env.Config.allowedDomainSet; set != nil {
+		var rejected []string
+		for _, addr := range append(append([]string{}, to...), cc...) {
+			domain := strings.ToLower(addr[strings.LastIndex(addr, "@")+1:])
+			if _, ok := set[domain]; !ok {
+				rejected = append(rejected, addr)
+			}
+		}
+		if rejected != nil {
+			return fail("recipient domain not allowed: %v not in allowed domains %v",
+				strings.Join(rejected, ", "), env.Config.AllowedDomains)
+		}
+	}
+
 	// --- attachments ---------------------------------------------------------
 	var attachments []Attachment
 	if v, present := args["attachments"]; present && v != nil {
