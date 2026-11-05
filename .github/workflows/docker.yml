@@ -1,7 +1,7 @@
 name: Build and publish image
 
 # Builds a multi-arch (amd64 + arm64) Linux image and pushes it to ghcr.io.
-# - On push to main: tag as `latest` + `<short-sha>`.
+# - On push to main: tag as `main` + `<short-sha>` (`latest` tracks the newest v* tag, not main).
 # - On tag v*: tag as the version (e.g. v1.0.0) and `latest`, then attach the
 #   image as .tar.gz files (one per arch) to the GitHub Release.
 # - On PR: build only, no push (validates the Dockerfile still builds).
