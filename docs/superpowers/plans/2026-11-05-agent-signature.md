@@ -428,3 +428,5 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ## Amendment Log
 
 (Deviations from this plan, appended as numbered items during execution.)
+
+1. Task 4 quality review: the plan's verbatim README bullet said "two-line attribution block" (the rendered block is 3 lines: `--` separator plus two label lines) and never showed the literal labels. Fix commit reworded the bullet without the line count and added the literal block plus the missing-names behavior to the `send-email tool` section.
