@@ -301,3 +301,82 @@ func TestSendEmail_MessageIDInResultAndMessage(t *testing.T) {
 		t.Errorf("Message-ID header and result must match: %q vs\n%s", mid, fs.Msg)
 	}
 }
+
+func TestSendEmail_SignatureAppended(t *testing.T) {
+	env, fs := newToolEnv(t)
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@example.com")
+	hdr.Set("X-Multica-Agent-Name", "Bob")
+	hdr.Set("X-Multica-Workspace-Name", "Acme")
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	if out["signature_appended"] != true {
+		t.Errorf("signature_appended = %v, want true", out["signature_appended"])
+	}
+	// QP leaves hard line breaks as literal CRLF and ASCII as literal; assert
+	// on the signature separator line and the two names, which survive the
+	// QP stream unchanged.
+	sep := []byte("--\r\n")
+	if !bytes.Contains(fs.Msg, sep) {
+		t.Errorf("signature separator not found in message:\n%s", fs.Msg)
+	}
+	if !bytes.Contains(fs.Msg, []byte("Bob")) || !bytes.Contains(fs.Msg, []byte("Acme")) {
+		t.Errorf("signature names not found in message:\n%s", fs.Msg)
+	}
+}
+
+func TestSendEmail_SignatureNotAppended(t *testing.T) {
+	env, fs := newToolEnv(t)
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@example.com")
+	hdr.Set("X-Multica-Agent-Name", "Bob") // workspace_name missing
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	if out["signature_appended"] != false {
+		t.Errorf("signature_appended = %v, want false", out["signature_appended"])
+	}
+	if bytes.Contains(fs.Msg, []byte("--\r\n")) {
+		t.Errorf("signature must not appear:\n%s", fs.Msg)
+	}
+	if bytes.Contains(fs.Msg, []byte("Bob")) {
+		t.Errorf("agent name must not leak into unsigned body:\n%s", fs.Msg)
+	}
+}
+
+func TestSendEmail_SignatureHtmlBody(t *testing.T) {
+	env, fs := newToolEnv(t)
+	hdr := http.Header{}
+	hdr.Set("X-Multica-User-Email", "user@example.com")
+	hdr.Set("X-Multica-Agent-Name", "Bob")
+	hdr.Set("X-Multica-Workspace-Name", "Acme")
+
+	out := callSendEmail(t, env, hdr, map[string]any{
+		"to":        "a@x.com",
+		"subject":   "s",
+		"body":      "<p>hi</p>",
+		"body_type": "html",
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	if out["signature_appended"] != true {
+		t.Errorf("signature_appended = %v, want true", out["signature_appended"])
+	}
+	if !bytes.Contains(fs.Msg, []byte("<br>--<br>")) {
+		t.Errorf("html signature separator not found:\n%s", fs.Msg)
+	}
+}

@@ -46,16 +46,17 @@ type attachmentArg struct {
 
 // emailResult is the JSON payload returned by the tool.
 type emailResult struct {
-	Success         bool              `json:"success"`
-	MessageID       string            `json:"message_id,omitempty"`
-	To              []string          `json:"to"`
-	Cc              []string          `json:"cc,omitempty"`
-	From            string            `json:"from"`
-	ReplyTo         string            `json:"reply_to,omitempty"`
-	AttachmentCount int               `json:"attachment_count"`
-	DurationMs      float64           `json:"duration_ms"`
-	Error           string            `json:"error,omitempty"`
-	MulticaContext  map[string]string `json:"multica_context"`
+	Success           bool              `json:"success"`
+	MessageID         string            `json:"message_id,omitempty"`
+	To                []string          `json:"to"`
+	Cc                []string          `json:"cc,omitempty"`
+	From              string            `json:"from"`
+	ReplyTo           string            `json:"reply_to,omitempty"`
+	AttachmentCount   int               `json:"attachment_count"`
+	SignatureAppended bool              `json:"signature_appended"`
+	DurationMs        float64           `json:"duration_ms"`
+	Error             string            `json:"error,omitempty"`
+	MulticaContext    map[string]string `json:"multica_context"`
 }
 
 func errPayload(errMsg string, mc map[string]string) []byte {
@@ -204,6 +205,10 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	}
 
 	// --- build & send ---------------------------------------------------------
+	// --- agent signature -----------------------------------------------------
+	signedBody := appendAgentSignature(body, bodyType, mc)
+	signatureAppended := signedBody != body
+
 	email := Email{
 		From:        env.Config.SMTP.From,
 		To:          to,
@@ -211,7 +216,7 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 		ReplyTo:     replyTo,
 		Subject:     subject,
 		MessageID:   newMessageID(env.Config.SMTP.From),
-		Body:        body,
+		Body:        signedBody,
 		BodyType:    bodyType,
 		Attachments: attachments,
 	}
@@ -225,15 +230,16 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	}
 
 	result := emailResult{
-		Success:         true,
-		MessageID:       email.MessageID,
-		To:              to,
-		Cc:              cc,
-		From:            env.Config.SMTP.From,
-		ReplyTo:         replyTo,
-		AttachmentCount: len(attachments),
-		DurationMs:      float64(time.Since(start).Microseconds()) / 1000.0,
-		MulticaContext:  mc,
+		Success:           true,
+		MessageID:         email.MessageID,
+		To:                to,
+		Cc:                cc,
+		From:              env.Config.SMTP.From,
+		ReplyTo:           replyTo,
+		AttachmentCount:   len(attachments),
+		SignatureAppended: signatureAppended,
+		DurationMs:        float64(time.Since(start).Microseconds()) / 1000.0,
+		MulticaContext:    mc,
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
