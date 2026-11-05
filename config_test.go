@@ -107,3 +107,68 @@ smtp:
 		t.Fatal("expected error for zero MAX_ATTACHMENT_MB (would disable the transport body cap)")
 	}
 }
+
+func TestLoadConfig_AllowedDomains(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+allowed_domains:
+  - "Example.com"
+  - " acme.org "
+  - ""
+  - "acme.org"
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"example.com", "acme.org"}
+	if len(cfg.AllowedDomains) != 2 || cfg.AllowedDomains[0] != want[0] || cfg.AllowedDomains[1] != want[1] {
+		t.Fatalf("AllowedDomains = %v, want %v", cfg.AllowedDomains, want)
+	}
+	if _, ok := cfg.allowedDomainSet["example.com"]; !ok {
+		t.Errorf("allowedDomainSet missing example.com: %v", cfg.allowedDomainSet)
+	}
+	if _, ok := cfg.allowedDomainSet["acme.org"]; !ok {
+		t.Errorf("allowedDomainSet missing acme.org: %v", cfg.allowedDomainSet)
+	}
+	if len(cfg.allowedDomainSet) != 2 {
+		t.Errorf("allowedDomainSet size = %d, want 2", len(cfg.allowedDomainSet))
+	}
+}
+
+func TestLoadConfig_AllowedDomainsEnvOverride(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+allowed_domains:
+  - "file.com"
+`)
+	t.Setenv("ALLOWED_DOMAINS", " EnvA.com , envb.com, ,enva.com ")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// env replaces the file list entirely; same normalization rules.
+	want := []string{"enva.com", "envb.com"}
+	if len(cfg.AllowedDomains) != 2 || cfg.AllowedDomains[0] != want[0] || cfg.AllowedDomains[1] != want[1] {
+		t.Fatalf("AllowedDomains = %v, want %v (env must replace file list)", cfg.AllowedDomains, want)
+	}
+}
+
+func TestLoadConfig_AllowedDomainsAbsent(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AllowedDomains != nil {
+		t.Errorf("AllowedDomains = %v, want nil when unconfigured", cfg.AllowedDomains)
+	}
+	if cfg.allowedDomainSet != nil {
+		t.Errorf("allowedDomainSet = %v, want nil when unconfigured", cfg.allowedDomainSet)
+	}
+}
