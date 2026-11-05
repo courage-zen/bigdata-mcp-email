@@ -21,7 +21,7 @@
 - Create: `.dockerignore`
 - Modify: `README.md` (Install section, after the "Or run in Docker:" block)
 
-- [ ] **Step 1: Write `.dockerignore`**
+- [x] **Step 1: Write `.dockerignore`**
 
 ```
 .git
@@ -33,7 +33,7 @@ email-mcp
 
 (Local `config.yaml` and the `email-mcp` build binary must never ride in the CI build context; `.git`/`docs`/`.github` are pure bloat. The Dockerfile only COPYies `go.mod go.sum *.go`, so this changes nothing about the image itself.)
 
-- [ ] **Step 2: Write `.github/workflows/docker.yml`**
+- [x] **Step 2: Write `.github/workflows/docker.yml`**
 
 ```yaml
 name: Build and publish image
@@ -148,7 +148,7 @@ jobs:
 
 Notes on the three deliberate adaptations from the forwarder original: asset names carry the `-image-` infix (`email-mcp-image-<tag>-linux-<arch>.tar.gz`) because binary assets `email-mcp-linux-<arch>.tar.gz` already exist in the same Release; the local (loaded) tag is `email-mcp:<tag>-<arch>`; `IMAGE_NAME: ${{ github.repository }}` resolves to `courage-zen/bigdata-mcp-email`, already lowercase so metadata-action needs no case handling.
 
-- [ ] **Step 3: README — add image options to Install**
+- [x] **Step 3: README — add image options to Install**
 
 After the existing "Or run in Docker:" block (the `docker build` / `docker run` snippet), append:
 
@@ -167,7 +167,7 @@ docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=you@example.com em
 ```
 ````
 
-- [ ] **Step 4: Validate locally**
+- [x] **Step 4: Validate locally**
 
 ```bash
 python3 -c "import yaml; yaml.safe_load(open('.github/workflows/docker.yml')); print('yaml ok')"
@@ -179,7 +179,7 @@ Expected: `yaml ok`, tests pass, exactly the three expected files modified/creat
 
 Optionally attempt `docker build -t email-mcp-ci-check .` — if the local daemon cannot reach Docker Hub (network/proxy), that is NOT a failure of this task; the PR run in Task 2 is the real Dockerfile validation. Clean up with `docker rmi email-mcp-ci-check` if it built.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/docker.yml .dockerignore README.md
@@ -194,7 +194,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 **Files:** none (operational — gh CLI + git). No commit.
 
-- [ ] **Step 1: Create the repo and remote**
+- [x] **Step 1: Create the repo and remote**
 
 ```bash
 gh repo create courage-zen/bigdata-mcp-email --public \
@@ -204,7 +204,7 @@ git remote add origin git@github.com:courage-zen/bigdata-mcp-email.git
 
 Expected: repo URL printed, no error. (If the name is somehow taken, stop and report — do not pick a different name unilaterally.)
 
-- [ ] **Step 2: Push main, then the feature branch**
+- [x] **Step 2: Push main, then the feature branch**
 
 ```bash
 git push -u origin main
@@ -213,7 +213,7 @@ git push -u origin feature/image-release
 
 Expected: both pushes succeed (SSH auth via gh's configured key). main lands at `4512725`-plus-spec/plan commits — whatever local main holds — and becomes the repo's default branch.
 
-- [ ] **Step 3: Open the PR**
+- [x] **Step 3: Open the PR**
 
 ```bash
 gh pr create --base main --head feature/image-release \
@@ -225,11 +225,11 @@ gh pr create --base main --head feature/image-release \
 - `.dockerignore` trims the CI build context; README documents `docker pull` / `docker load` options
 
 ## Test Plan
-- [ ] PR checks green (build.yml vet+test+build; docker.yml QEMU multi-arch build, no push)
-- [ ] After merge: main-push GHCR tags (`main`, short-sha) with both arches
-- [ ] After tag v0.0.1: Release has 2 binary tar.gz + checksums.txt + 2 image tar.gz
-- [ ] `docker load` + `docker run` from the image asset; `/health` returns 200
-- [ ] Anonymous pull of ghcr.io/courage-zen/bigdata-mcp-email:v0.0.1
+- [x] PR checks green (build.yml vet+test+build; docker.yml QEMU multi-arch build, no push)
+- [x] After merge: main-push GHCR tags (`main`, short-sha) with both arches
+- [x] After tag v0.0.1: Release has 2 binary tar.gz + checksums.txt + 2 image tar.gz
+- [x] `docker load` + `docker run` from the image asset; `/health` returns 200
+- [x] Anonymous pull of ghcr.io/courage-zen/bigdata-mcp-email:v0.0.1
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -238,7 +238,7 @@ EOF
 
 Expected: PR URL printed.
 
-- [ ] **Step 4: Watch PR checks to green**
+- [x] **Step 4: Watch PR checks to green**
 
 ```bash
 gh pr checks --watch
@@ -252,7 +252,7 @@ Expected: two checks, both eventually pass — `Build` (build.yml: vet, 48 tests
 
 **Files:** none (operational).
 
-- [ ] **Step 1: Fast-forward merge and push**
+- [x] **Step 1: Fast-forward merge and push**
 
 ```bash
 git checkout main
@@ -262,7 +262,7 @@ git push origin main
 
 Expected: fast-forward succeeds, push succeeds, the PR auto-closes as merged (verify: `gh pr view --json state --jq .state` → `MERGED`). Keep the feature branch for now (deleted during branch finishing, not here).
 
-- [ ] **Step 2: Watch the main-push workflows**
+- [x] **Step 2: Watch the main-push workflows**
 
 ```bash
 run_id=$(gh run list --workflow build.yml --limit 1 --json databaseId --jq '.[0].databaseId')
@@ -273,7 +273,7 @@ gh run watch "$run_id" --exit-status
 
 Expected: both succeed. The docker.yml run now pushes (login step active, `main` + short-sha tags via metadata-action — `latest` only materializes on v* tag pushes, verified in Task 4).
 
-- [ ] **Step 3: Verify multi-arch tags on GHCR**
+- [x] **Step 3: Verify multi-arch tags on GHCR**
 
 ```bash
 docker buildx imagetools inspect ghcr.io/courage-zen/bigdata-mcp-email:main
@@ -281,7 +281,7 @@ docker buildx imagetools inspect ghcr.io/courage-zen/bigdata-mcp-email:main
 
 Expected: a manifest list with two manifests — `linux/amd64` and `linux/arm64`. If local buildx cannot reach ghcr.io (network/proxy), fall back to proving the package exists via Step 4's `gh api` call, and defer the arch proof to Task 4's asset download (which only works if both arches were exported).
 
-- [ ] **Step 4: Verify public visibility (the spec's anonymous-pull guarantee)**
+- [x] **Step 4: Verify public visibility (the spec's anonymous-pull guarantee)**
 
 ```bash
 gh api /user/packages/container/bigdata-mcp-email --jq '.visibility'
@@ -304,7 +304,7 @@ Expected: `200` (a truly anonymous token can read the manifest).
 
 **Files:** none (operational).
 
-- [ ] **Step 1: Push the tag**
+- [x] **Step 1: Push the tag**
 
 ```bash
 git tag v0.0.1
@@ -313,7 +313,7 @@ git push origin v0.0.1
 
 Expected: tag push triggers two workflows: `Release` (release.yml: test → binaries matrix + smoke → publish) and `Build and publish image` (docker.yml: build+push → export → attach).
 
-- [ ] **Step 2: Watch both to green**
+- [x] **Step 2: Watch both to green**
 
 ```bash
 for wf in release.yml docker.yml; do
@@ -324,7 +324,7 @@ done
 
 Expected: both succeed. Contingency — if one workflow fails on the release-create race (both call softprops on the same tag), re-run just the failed job: `gh run rerun <id> --failed`; softprops appends to the existing release, so a re-run converges.
 
-- [ ] **Step 3: Verify Release assets**
+- [x] **Step 3: Verify Release assets**
 
 ```bash
 gh release view v0.0.1 --json assets --jq '.assets[].name' | sort
@@ -340,7 +340,7 @@ email-mcp-linux-amd64.tar.gz
 email-mcp-linux-arm64.tar.gz
 ```
 
-- [ ] **Step 4: Load and run the image from the downloaded asset (no registry)**
+- [x] **Step 4: Load and run the image from the downloaded asset (no registry)**
 
 ```bash
 arch=$(uname -m); [ "$arch" = "arm64" ] && a=arm64 || a=amd64
@@ -355,7 +355,7 @@ curl -s http://127.0.0.1:18000/health
 
 Expected: `{"status":"ok"}` (proves the loaded image boots — config validation passes with env-only settings, health endpoint answers).
 
-- [ ] **Step 5: Full tool call through the image**
+- [x] **Step 5: Full tool call through the image**
 
 ```bash
 curl -s -X POST http://127.0.0.1:18000/mcp \
@@ -369,7 +369,7 @@ curl -s -X POST http://127.0.0.1:18000/mcp \
 
 Expected: `context echo OK` — auth middleware, stateless MCP handler, tool, error payload with `multica_context` all work from inside the image (the send fails at SMTP dial since no forwarder is running; the failure response still echoes the header email — that is the assertion).
 
-- [ ] **Step 6: Cleanup and registry-tag sanity**
+- [x] **Step 6: Cleanup and registry-tag sanity**
 
 ```bash
 docker rm -f email-mcp-verify
@@ -381,7 +381,7 @@ gh release view v0.0.1 --json url --jq .url
 
 Expected: `semver tag 0.0.1 present` (metadata-action's semver tag alongside `v0.0.1`) and the release URL — which is the README's Releases link now resolving to a real page.
 
-- [ ] **Step 7: Report**
+- [x] **Step 7: Report**
 
 No commit in this task. Report: workflow run URLs, the five asset names, the `/health` output, the tool-call grep result, and the anonymous-manifest status code from Task 3.
 
@@ -392,3 +392,5 @@ No commit in this task. Report: workflow run URLs, the five asset names, the `/h
 (Record implementation deviations from this plan as numbered items, appended during execution.)
 
 1. T1 quality review: docker/metadata-action v5 only creates `latest` on v* tag pushes (main pushes get `main` + short-sha). Corrected docker.yml header comment, PR-body bullet, and Task 3 Step 2 prose/Step 3 inspect target (`:latest` → `:main`). Verified against metadata-action v5 source by the quality reviewer. Also corrected Task 3 Step 4's anonymous manifest check (manifests/latest → manifests/main) for the same reason.
+2. T4 quality review: the live GHCR tag inventory at v0.0.1 is SIX tags, not five — `main`, `03a2e58`, `v0.0.1`, `0.0.1`, `0.0`, `latest`. The extra `0.0` comes from docker.yml's deliberate `type=semver,pattern={{major}}.{{minor}}` tag line; `v0.0.1`, `0.0.1`, `0.0`, and `latest` all resolve to the same multi-arch index (sha256:3a42d521…). Not stray. Noted for future auditors; also verified: tag↔server.go Version↔image labels (version 0.0.1, revision 03a2e58…) fully coherent, README's four promises all true live, checksums.txt digests match GitHub's recorded binary asset digests byte-for-byte.
+3. T4 quality review (next-cycle notes, no action on v0.0.1): binary asset names carry no version and will collide on disk across future releases (image assets already carry the tag); optional `v*` tag protection rule on the now-public repo; optional one-line checksums.txt scope note (image integrity is proven via registry digest match).
