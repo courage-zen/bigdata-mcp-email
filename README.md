@@ -36,6 +36,19 @@ docker build -t email-mcp .
 docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=noreply@example.com email-mcp
 ```
 
+Or pull the image from GHCR:
+
+```sh
+docker pull ghcr.io/courage-zen/bigdata-mcp-email:v0.0.1
+```
+
+Or download a per-arch image tar.gz from [Releases](https://github.com/courage-zen/bigdata-mcp-email/releases) and load it — no registry access needed (air-gapped path):
+
+```sh
+docker load -i email-mcp-image-v0.0.1-linux-arm64.tar.gz
+docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=you@example.com email-mcp:v0.0.1-arm64
+```
+
 ## Configure
 
 `config.yaml` (path override: `EMAIL_MCP_CONFIG`):
