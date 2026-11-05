@@ -172,3 +172,21 @@ smtp:
 		t.Errorf("allowedDomainSet = %v, want nil when unconfigured", cfg.allowedDomainSet)
 	}
 }
+
+func TestLoadConfig_AllowedDomainsEnvGarbage(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	t.Setenv("ALLOWED_DOMAINS", " , , ")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AllowedDomains != nil {
+		t.Errorf("AllowedDomains = %v, want nil when env holds only separators", cfg.AllowedDomains)
+	}
+	if cfg.allowedDomainSet != nil {
+		t.Errorf("allowedDomainSet = %v, want nil (inactive)", cfg.allowedDomainSet)
+	}
+}
