@@ -293,7 +293,7 @@ Expected: `public`. If it prints `private` (new GHCR packages do not always inhe
 token=$(curl -s "https://ghcr.io/token?scope=repository:courage-zen/bigdata-mcp-email:pull" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $token" \
   -H "Accept: application/vnd.oci.image.index.v1+json" \
-  https://ghcr.io/v2/courage-zen/bigdata-mcp-email/manifests/latest
+  https://ghcr.io/v2/courage-zen/bigdata-mcp-email/manifests/main
 ```
 
 Expected: `200` (a truly anonymous token can read the manifest).
@@ -391,4 +391,4 @@ No commit in this task. Report: workflow run URLs, the five asset names, the `/h
 
 (Record implementation deviations from this plan as numbered items, appended during execution.)
 
-1. T1 quality review: docker/metadata-action v5 only creates `latest` on v* tag pushes (main pushes get `main` + short-sha). Corrected docker.yml header comment, PR-body bullet, and Task 3 Step 2 prose/Step 3 inspect target (`:latest` → `:main`). Verified against metadata-action v5 source by the quality reviewer.
+1. T1 quality review: docker/metadata-action v5 only creates `latest` on v* tag pushes (main pushes get `main` + short-sha). Corrected docker.yml header comment, PR-body bullet, and Task 3 Step 2 prose/Step 3 inspect target (`:latest` → `:main`). Verified against metadata-action v5 source by the quality reviewer. Also corrected Task 3 Step 4's anonymous manifest check (manifests/latest → manifests/main) for the same reason.
