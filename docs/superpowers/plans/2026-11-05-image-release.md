@@ -226,7 +226,7 @@ gh pr create --base main --head feature/image-release \
 
 ## Test Plan
 - [ ] PR checks green (build.yml vet+test+build; docker.yml QEMU multi-arch build, no push)
-- [ ] After merge: main-push GHCR tags (`latest`, short-sha) with both arches
+- [ ] After merge: main-push GHCR tags (`main`, short-sha) with both arches
 - [ ] After tag v0.0.1: Release has 2 binary tar.gz + checksums.txt + 2 image tar.gz
 - [ ] `docker load` + `docker run` from the image asset; `/health` returns 200
 - [ ] Anonymous pull of ghcr.io/courage-zen/bigdata-mcp-email:v0.0.1
@@ -271,12 +271,12 @@ run_id=$(gh run list --workflow docker.yml --limit 1 --json databaseId --jq '.[0
 gh run watch "$run_id" --exit-status
 ```
 
-Expected: both succeed. The docker.yml run now pushes (login step active, `latest` + `main` + short-sha tags via metadata-action).
+Expected: both succeed. The docker.yml run now pushes (login step active, `main` + short-sha tags via metadata-action — `latest` only materializes on v* tag pushes, verified in Task 4).
 
 - [ ] **Step 3: Verify multi-arch tags on GHCR**
 
 ```bash
-docker buildx imagetools inspect ghcr.io/courage-zen/bigdata-mcp-email:latest
+docker buildx imagetools inspect ghcr.io/courage-zen/bigdata-mcp-email:main
 ```
 
 Expected: a manifest list with two manifests — `linux/amd64` and `linux/arm64`. If local buildx cannot reach ghcr.io (network/proxy), fall back to proving the package exists via Step 4's `gh api` call, and defer the arch proof to Task 4's asset download (which only works if both arches were exported).
@@ -391,4 +391,4 @@ No commit in this task. Report: workflow run URLs, the five asset names, the `/h
 
 (Record implementation deviations from this plan as numbered items, appended during execution.)
 
-1. (none yet)
+1. T1 quality review: docker/metadata-action v5 only creates `latest` on v* tag pushes (main pushes get `main` + short-sha). Corrected docker.yml header comment, PR-body bullet, and Task 3 Step 2 prose/Step 3 inspect target (`:latest` → `:main`). Verified against metadata-action v5 source by the quality reviewer.
