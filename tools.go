@@ -180,8 +180,12 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 			}
 		}
 		if rejected != nil {
-			return fail("recipient domain not allowed: %v not in allowed domains %v",
-				strings.Join(rejected, ", "), env.Config.AllowedDomains)
+			quoted := make([]string, len(rejected))
+			for i, addr := range rejected {
+				quoted[i] = fmt.Sprintf("%q", addr)
+			}
+			return fail("recipient domain not allowed: %s not in allowed domains [%s]",
+				strings.Join(quoted, ", "), strings.Join(env.Config.AllowedDomains, ", "))
 		}
 	}
 

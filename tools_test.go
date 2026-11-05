@@ -408,11 +408,11 @@ func TestSendEmail_DomainAllowlist_BlockedTo(t *testing.T) {
 		t.Fatalf("success = %v, want false (out-of-list to must be rejected)", out["success"])
 	}
 	errMsg, _ := out["error"].(string)
-	if !strings.Contains(errMsg, "a@evil.com") {
-		t.Errorf("error must name the rejected address, got: %q", errMsg)
+	if !strings.Contains(errMsg, `"a@evil.com"`) {
+		t.Errorf("error must name the rejected address (quoted), got: %q", errMsg)
 	}
-	if !strings.Contains(errMsg, "example.com") || !strings.Contains(errMsg, "acme.org") {
-		t.Errorf("error must list configured domains, got: %q", errMsg)
+	if !strings.Contains(errMsg, "[example.com, acme.org]") {
+		t.Errorf("error must list configured domains comma-separated, got: %q", errMsg)
 	}
 	if fs.To != nil || fs.Msg != nil {
 		t.Errorf("nothing must be sent when rejected (to=%v, msg set=%v)", fs.To, fs.Msg != nil)
@@ -434,8 +434,8 @@ func TestSendEmail_DomainAllowlist_BlockedCc(t *testing.T) {
 		t.Fatalf("success = %v, want false (out-of-list cc must be rejected)", out["success"])
 	}
 	errMsg, _ := out["error"].(string)
-	if !strings.Contains(errMsg, "b@evil.com") {
-		t.Errorf("error must name the rejected cc address, got: %q", errMsg)
+	if !strings.Contains(errMsg, `"b@evil.com"`) {
+		t.Errorf("error must name the rejected cc address (quoted), got: %q", errMsg)
 	}
 }
 
@@ -452,8 +452,8 @@ func TestSendEmail_DomainAllowlist_BlockedFallback(t *testing.T) {
 		t.Fatalf("success = %v, want false (out-of-list fallback user_email must be rejected)", out["success"])
 	}
 	errMsg, _ := out["error"].(string)
-	if !strings.Contains(errMsg, "user@outside.com") {
-		t.Errorf("error must name the rejected fallback address, got: %q", errMsg)
+	if !strings.Contains(errMsg, `"user@outside.com"`) {
+		t.Errorf("error must name the rejected fallback address (quoted), got: %q", errMsg)
 	}
 }
 
@@ -471,8 +471,8 @@ func TestSendEmail_DomainAllowlist_MixedBlocked(t *testing.T) {
 		t.Fatalf("success = %v, want false (any out-of-list recipient rejects the whole call)", out["success"])
 	}
 	errMsg, _ := out["error"].(string)
-	if !strings.Contains(errMsg, "b@evil.com") {
-		t.Errorf("error must name the rejected address, got: %q", errMsg)
+	if !strings.Contains(errMsg, `"b@evil.com"`) {
+		t.Errorf("error must name the rejected address (quoted), got: %q", errMsg)
 	}
 	if fs.To != nil || fs.Msg != nil {
 		t.Errorf("nothing must be sent when rejected (to=%v, msg set=%v)", fs.To, fs.Msg != nil)
