@@ -10,6 +10,10 @@ multica agent → multica-stdio-mcp-proxy → email-mcp :8000/mcp → local-smtp
 - Recipient fallback: empty `to` → `X-Multica-User-Email` → error
 - From is fixed (`smtp.from`); on fallback a `Reply-To` points at the caller
 - `X-Multica-*` headers are echoed in the tool result as `multica_context`
+- Agent signature: when `X-Multica-Agent-Name` and `X-Multica-Workspace-Name`
+  are both present, a two-line attribution block (`--` / agent / workspace,
+  plain text, `<br>` in html bodies) is appended to the body; the tool result
+  reports it via `signature_appended`
 
 ## Install
 
@@ -100,8 +104,8 @@ The proxy injects the `X-Multica-*` identity headers automatically.
 | `attachments` | array | `{filename, content_b64, content_type?}` |
 
 Returns JSON: `success`, `message_id`, `to`, `cc`, `from`, `reply_to`,
-`attachment_count`, `duration_ms`, `multica_context`; `error` is present on
-failure (omitted on success).
+`attachment_count`, `signature_appended`, `duration_ms`, `multica_context`;
+`error` is present on failure (omitted on success).
 
 ## Deployment (k8s sidecar)
 
