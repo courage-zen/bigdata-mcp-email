@@ -444,3 +444,4 @@ Follow `docs/superpowers/specs/2026-11-05-image-release-design.md` conventions (
 (Deviations from this plan, appended as numbered items during execution.)
 
 1. Task 1 code-quality review follow-ups folded into Task 2: LoadConfig doc comment now lists ALLOWED_DOMAINS; added TestLoadConfig_AllowedDomainsEnvGarbage (env with only separators → inactive). Plan's Task 2 full-suite count corrected: 62 test functions (56 after Task 1 + 6 new), the plan's "59" was an arithmetic slip.
+2. Task 2 quality-review follow-ups folded into Task 3: error message now quotes rejected addresses and comma-separates the domain list (matching the design doc's error format, tests tightened accordingly); config.example.yaml documents allowed_domains/ALLOWED_DOMAINS alongside the README changes.
