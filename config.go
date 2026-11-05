@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,12 +28,36 @@ type fileConfig struct {
 		Port int    `yaml:"port"`
 		From string `yaml:"from"`
 	} `yaml:"smtp"`
-	MaxAttachmentMB int `yaml:"max_attachment_mb"`
+	MaxAttachmentMB int      `yaml:"max_attachment_mb"`
+	AllowedDomains  []string `yaml:"allowed_domains"`
 }
 
 type Config struct {
 	SMTP            SMTPConfig
 	MaxAttachmentMB int
+	AllowedDomains  []string
+	// allowedDomainSet is the lookup form of AllowedDomains (lowercased,
+	// trimmed, deduplicated); nil means the allowlist is inactive.
+	allowedDomainSet map[string]struct{}
+}
+
+// normalizeDomains trims, lowercases, drops empties, and collapses
+// duplicates while preserving first-seen order.
+func normalizeDomains(in []string) []string {
+	var out []string
+	seen := make(map[string]struct{})
+	for _, d := range in {
+		d = strings.ToLower(strings.TrimSpace(d))
+		if d == "" {
+			continue
+		}
+		if _, dup := seen[d]; dup {
+			continue
+		}
+		seen[d] = struct{}{}
+		out = append(out, d)
+	}
+	return out
 }
 
 // LoadConfig reads a YAML config file, applies defaults, then env overrides:
@@ -59,6 +84,7 @@ func LoadConfig(path string) (*Config, error) {
 			From: fc.SMTP.From,
 		},
 		MaxAttachmentMB: fc.MaxAttachmentMB,
+		AllowedDomains:  fc.AllowedDomains,
 	}
 
 	if cfg.SMTP.Host == "" {
@@ -91,6 +117,19 @@ func LoadConfig(path string) (*Config, error) {
 			return nil, fmt.Errorf("MAX_ATTACHMENT_MB: %w", err)
 		}
 		cfg.MaxAttachmentMB = n
+	}
+
+	// Allowlist normalization: env replaces the file list entirely.
+	if v := os.Getenv("ALLOWED_DOMAINS"); v != "" {
+		cfg.AllowedDomains = strings.Split(v, ",")
+	}
+	cfg.AllowedDomains = normalizeDomains(cfg.AllowedDomains)
+	if len(cfg.AllowedDomains) > 0 {
+		set := make(map[string]struct{}, len(cfg.AllowedDomains))
+		for _, d := range cfg.AllowedDomains {
+			set[d] = struct{}{}
+		}
+		cfg.allowedDomainSet = set
 	}
 
 	if cfg.SMTP.From == "" {
