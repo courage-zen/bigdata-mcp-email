@@ -463,7 +463,7 @@ func TestSendEmail_DomainAllowlist_MixedBlocked(t *testing.T) {
 	hdr.Set("X-Multica-User-Email", "user@example.com")
 
 	out := callSendEmail(t, env, hdr, map[string]any{
-		"to":      []any{"a@example.com", "b@evil.com", "c@example.com"},
+		"to":      []any{"a@example.com", "b@evil.com", "c@evil.com"},
 		"subject": "s",
 		"body":    "hi",
 	})
@@ -471,8 +471,8 @@ func TestSendEmail_DomainAllowlist_MixedBlocked(t *testing.T) {
 		t.Fatalf("success = %v, want false (any out-of-list recipient rejects the whole call)", out["success"])
 	}
 	errMsg, _ := out["error"].(string)
-	if !strings.Contains(errMsg, `"b@evil.com"`) {
-		t.Errorf("error must name the rejected address (quoted), got: %q", errMsg)
+	if !strings.Contains(errMsg, `"b@evil.com", "c@evil.com"`) {
+		t.Errorf("error must list both rejected addresses quoted and comma-joined, got: %q", errMsg)
 	}
 	if fs.To != nil || fs.Msg != nil {
 		t.Errorf("nothing must be sent when rejected (to=%v, msg set=%v)", fs.To, fs.Msg != nil)

@@ -21,5 +21,5 @@ smtp:
 #   MCP_HOST      listen address (default 0.0.0.0)
 #   MCP_PORT      listen port   (default 8000)
 #   EMAIL_MCP_CONFIG  path to this file (default ./config.yaml)
-# SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB / ALLOWED_DOMAINS
-# (comma-separated) override the file.
+# SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB override the file;
+# ALLOWED_DOMAINS (comma-separated) replaces allowed_domains.

@@ -62,7 +62,7 @@ smtp:
   port: 2525
   from: "noreply@example.com"
 max_attachment_mb: 10   # optional
-allowed_domains:          # optional; omit = no restriction
+allowed_domains:        # optional; omit = no restriction
   - "example.com"
   - "acme.org"
 ```
