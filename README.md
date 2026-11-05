@@ -11,9 +11,8 @@ multica agent → multica-stdio-mcp-proxy → email-mcp :8000/mcp → local-smtp
 - From is fixed (`smtp.from`); on fallback a `Reply-To` points at the caller
 - `X-Multica-*` headers are echoed in the tool result as `multica_context`
 - Agent signature: when `X-Multica-Agent-Name` and `X-Multica-Workspace-Name`
-  are both present, a two-line attribution block (`--` / agent / workspace,
-  plain text, `<br>` in html bodies) is appended to the body; the tool result
-  reports it via `signature_appended`
+  are both present, an attribution block identifying the agent and workspace
+  is appended to the body; the tool result reports it via `signature_appended`
 
 ## Install
 
@@ -106,6 +105,18 @@ The proxy injects the `X-Multica-*` identity headers automatically.
 Returns JSON: `success`, `message_id`, `to`, `cc`, `from`, `reply_to`,
 `attachment_count`, `signature_appended`, `duration_ms`, `multica_context`;
 `error` is present on failure (omitted on success).
+
+When `X-Multica-Agent-Name` and `X-Multica-Workspace-Name` both carry a
+non-empty value, this block is appended to the end of the body:
+
+```text
+--
+Multica 智能体：{agent_name}
+工作区：{workspace_name}
+```
+
+html bodies get the same lines with `<br>` breaks. Otherwise the body is sent
+unchanged and `signature_appended` is `false`.
 
 ## Deployment (k8s sidecar)
 
