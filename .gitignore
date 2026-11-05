@@ -1,3 +1,4 @@
 config.yaml
 email-mcp
 *.test
+.worktrees
