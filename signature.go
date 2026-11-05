@@ -17,7 +17,7 @@ func appendAgentSignature(body, bodyType string, mc map[string]string) string {
 		return body
 	}
 	if bodyType == "html" {
-		return fmt.Sprintf("%s\n<br>--<br>\nMultica 智能体：%s\n<br>工作区：%s\n<br>", body, agent, workspace)
+		return fmt.Sprintf("%s\n<br>--<br>\n智能体：%s\n<br>工作区：%s\n<br>", body, agent, workspace)
 	}
-	return fmt.Sprintf("%s\n\n--\nMultica 智能体：%s\n工作区：%s", body, agent, workspace)
+	return fmt.Sprintf("%s\n\n--\n智能体：%s\n工作区：%s", body, agent, workspace)
 }
