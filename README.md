@@ -62,13 +62,23 @@ smtp:
   port: 2525
   from: "noreply@example.com"
 max_attachment_mb: 10   # optional
+allowed_domains:          # optional; omit = no restriction
+  - "example.com"
+  - "acme.org"
 ```
 
 Environment variables override the file: `SMTP_HOST` `SMTP_PORT` `SMTP_FROM`
-`MAX_ATTACHMENT_MB`. Server env: `MCP_AUTH_KEY` (comma-separated bearer keys;
+`MAX_ATTACHMENT_MB`, and `ALLOWED_DOMAINS` (comma-separated) overrides the
+`allowed_domains` file list. Server env: `MCP_AUTH_KEY` (comma-separated bearer keys;
 unset = no auth), `MCP_HOST` (default 0.0.0.0), `MCP_PORT` (default 8000).
 `/health` is exempt from auth. `smtp.from` (or `SMTP_FROM`) is required — the
 server exits at startup without it.
+
+When `allowed_domains` (or `ALLOWED_DOMAINS`) lists at least one domain, every
+recipient address — `to`, `cc`, and the fallback multica user email — must be
+at one of those domains (case-insensitive, exact match, subdomains don't
+match). Otherwise the whole message is rejected and the error names the
+rejected addresses and the configured domains.
 
 ## Multica wiring
 

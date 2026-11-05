@@ -10,9 +10,16 @@ smtp:
 # Per-attachment size cap in MiB (default 10).
 # max_attachment_mb: 10
 
+# Optional: restrict recipients to these domains (omit = no restriction).
+# Every to/cc/fallback address must be at one of these domains.
+# allowed_domains:
+#   - "example.com"
+#   - "acme.org"
+
 # Server-level settings come from env vars, not this file:
 #   MCP_AUTH_KEY  comma-separated bearer keys (unset = no auth, local dev only)
 #   MCP_HOST      listen address (default 0.0.0.0)
 #   MCP_PORT      listen port   (default 8000)
 #   EMAIL_MCP_CONFIG  path to this file (default ./config.yaml)
-# SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB override the file.
+# SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB / ALLOWED_DOMAINS
+# (comma-separated) override the file.
