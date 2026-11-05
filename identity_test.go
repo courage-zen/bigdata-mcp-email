@@ -55,3 +55,20 @@ func TestMulticaContextFromHeaders_NilSafe(t *testing.T) {
 		t.Errorf("nil headers must yield empty map, got %v", ctx)
 	}
 }
+
+func TestMulticaContextFromHeaders_NameHeaders(t *testing.T) {
+	h := http.Header{}
+	h.Set("X-Multica-Workspace-Name", "Acme")
+	h.Set("X-Multica-Agent-Name", "Bob")
+
+	ctx := MulticaContextFromHeaders(h)
+	if ctx["workspace_name"] != "Acme" {
+		t.Errorf("workspace_name = %q, want %q", ctx["workspace_name"], "Acme")
+	}
+	if ctx["agent_name"] != "Bob" {
+		t.Errorf("agent_name = %q, want %q", ctx["agent_name"], "Bob")
+	}
+	if len(ctx) != 2 {
+		t.Errorf("got %d fields, want 2: %v", len(ctx), ctx)
+	}
+}
