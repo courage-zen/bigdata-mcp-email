@@ -202,6 +202,25 @@ func TestSendEmail_StringToCommaSplit(t *testing.T) {
 	}
 }
 
+func TestSendEmail_StringCcCommaSplit(t *testing.T) {
+	env, fs := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"cc":      "b@x.com, c@x.com",
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	if len(fs.To) != 3 || fs.To[0] != "a@x.com" || fs.To[1] != "b@x.com" || fs.To[2] != "c@x.com" {
+		t.Errorf("envelope to = %v, want [a@x.com b@x.com c@x.com]", fs.To)
+	}
+	if !bytes.Contains(fs.Msg, []byte("Cc: b@x.com, c@x.com")) {
+		t.Errorf("Cc header missing or wrong: %s", fs.Msg)
+	}
+}
+
 func TestSendEmail_MissingSubject(t *testing.T) {
 	env, _ := newToolEnv(t)
 	out := callSendEmail(t, env, http.Header{}, map[string]any{
