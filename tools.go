@@ -107,11 +107,14 @@ func normalizeRecipients(v any) ([]string, error) {
 	case nil:
 		return nil, nil
 	case string:
-		s := strings.TrimSpace(x)
-		if s == "" {
-			return nil, nil
+		var out []string
+		for _, part := range strings.Split(x, ",") {
+			s := strings.TrimSpace(part)
+			if s != "" {
+				out = append(out, s)
+			}
 		}
-		return []string{s}, nil
+		return out, nil
 	case []any:
 		var out []string
 		for _, item := range x {

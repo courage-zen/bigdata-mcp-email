@@ -167,6 +167,21 @@ func TestSendEmail_StringToNormalizes(t *testing.T) {
 	}
 }
 
+func TestSendEmail_StringToCommaSplit(t *testing.T) {
+	env, fs := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com, b@x.com",
+		"subject": "s",
+		"body":    "hi",
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	if len(fs.To) != 2 || fs.To[0] != "a@x.com" || fs.To[1] != "b@x.com" {
+		t.Errorf("envelope to = %v, want [a@x.com b@x.com]", fs.To)
+	}
+}
+
 func TestSendEmail_MissingSubject(t *testing.T) {
 	env, _ := newToolEnv(t)
 	out := callSendEmail(t, env, http.Header{}, map[string]any{
