@@ -34,4 +34,6 @@ smtp:
 #   EMAIL_MCP_CONFIG  path to this file (default ./config.yaml)
 # SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB override the file;
 # ALLOWED_DOMAINS (comma-separated) replaces allowed_domains;
-# S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET / S3_SECURE override the file.
+# S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET / S3_SECURE override the
+# file, but only when the s3: section is present — a minimal s3: section
+# (at least one field) must exist for them to take effect.

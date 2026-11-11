@@ -79,9 +79,11 @@ func normalizeDomains(in []string) []string {
 }
 
 // LoadConfig reads a YAML config file, applies defaults, then env overrides:
-// SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB / ALLOWED_DOMAINS. An
-// empty path means "config.yaml in the current directory" (missing file is
-// not an error when env vars provide everything).
+// SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB / ALLOWED_DOMAINS,
+// plus S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET / S3_SECURE
+// (S3 vars apply only when the s3: section is present — the section gates
+// the feature). An empty path means "config.yaml in the current directory"
+// (missing file is not an error when env vars provide everything).
 func LoadConfig(path string) (*Config, error) {
 	if path == "" {
 		path = "config.yaml"

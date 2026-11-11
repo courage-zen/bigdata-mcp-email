@@ -263,3 +263,53 @@ s3:
 		t.Fatal("incomplete s3 section must fail at startup, not at first use")
 	}
 }
+
+func TestLoadConfig_S3EnvCompletesFileSection(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+s3:
+  endpoint: "minio.internal:9000"
+`)
+	t.Setenv("S3_ACCESS_KEY", "AK")
+	t.Setenv("S3_SECRET_KEY", "SK")
+	t.Setenv("S3_BUCKET", "B")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("env vars should complete a partial file section: %v", err)
+	}
+	if cfg.S3 == nil || cfg.S3.AccessKey != "AK" || cfg.S3.Endpoint != "minio.internal:9000" {
+		t.Fatalf("s3 = %+v", cfg.S3)
+	}
+}
+
+func TestLoadConfig_S3EmptySection(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+s3:
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.S3 != nil {
+		t.Fatalf("S3 = %+v, want nil for an empty s3: block (the escape hatch the error message recommends)", *cfg.S3)
+	}
+}
+
+func TestLoadConfig_S3SecureGarbage(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+s3:
+  endpoint: "minio.internal:9000"
+  access_key: "AK"
+  secret_key: "SK"
+  bucket: "multica-artifacts"
+`)
+	t.Setenv("S3_SECURE", "yes")
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("S3_SECURE=yes must fail: strconv.ParseBool accepts 1/t/true/0/f/false, not yes/no")
+	}
+}
