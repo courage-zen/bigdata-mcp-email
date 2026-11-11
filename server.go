@@ -101,20 +101,27 @@ const inputSchemaJSON = `{
     "to": {
       "anyOf": [
         {"type": "string", "description": "recipient, or comma-separated recipients"},
-        {"type": "array", "items": {"type": "string"}, "description": "recipient addresses"}
+        {"type": "array", "items": {"type": "string"}, "description": "recipient addresses"},
+        {"type": "null"}
       ],
       "description": "recipients; empty falls back to the multica caller's email"
     },
     "cc": {
       "anyOf": [
         {"type": "string", "description": "carbon-copy address, or comma-separated addresses"},
-        {"type": "array", "items": {"type": "string"}, "description": "carbon-copy addresses"}
+        {"type": "array", "items": {"type": "string"}, "description": "carbon-copy addresses"},
+        {"type": "null"}
       ],
       "description": "carbon-copy recipients; optional"
     },
     "subject": {"type": "string", "description": "email subject line (required)"},
     "body": {"type": "string", "description": "email body, plain text or HTML per body_type (required)"},
-    "body_type": {"type": "string", "enum": ["text", "html"], "description": "body rendering; default \"text\""},
+    "body_type": {
+      "anyOf": [
+        {"type": "string", "enum": ["text", "html"], "description": "body rendering; default \"text\""},
+        {"type": "null"}
+      ]
+    },
     "attachments": {
       "anyOf": [
         {
@@ -129,7 +136,8 @@ const inputSchemaJSON = `{
             }
           }
         },
-        {"type": "string", "description": "JSON-encoded array of attachment objects (tolerated for schema-less proxies)"}
+        {"type": "string", "description": "JSON-encoded array of attachment objects (tolerated for schema-less proxies)"},
+        {"type": "null"}
       ],
       "description": "optional attachments, max size per attachment from config"
     }

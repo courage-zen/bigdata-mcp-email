@@ -212,6 +212,10 @@ func TestServer_ToolSchemaExposed(t *testing.T) {
 	}
 }
 
+// TestServer_StringAttachmentsOverMCP pins the anyOf string branch for
+// attachments: schema-less proxies pass the array param as a JSON string,
+// which must clear SDK pre-validation and then hit the handler's JSON.parse
+// tolerance.
 func TestServer_StringAttachmentsOverMCP(t *testing.T) {
 	fs := &fakeSender{}
 	ts := httptest.NewServer(newTestHTTPServer(t, "", fs))
@@ -227,5 +231,65 @@ func TestServer_StringAttachmentsOverMCP(t *testing.T) {
 	}
 	if !strings.Contains(resp, `"attachment_count":1`) {
 		t.Fatalf("attachment not sent: %.300s", resp)
+	}
+}
+
+// TestServer_StringToOverMCP pins the anyOf string branch for "to": without
+// it, every other test would still pass because they all send arrays, yet
+// string recipients are core leniency for schema-less proxies.
+func TestServer_StringToOverMCP(t *testing.T) {
+	fs := &fakeSender{}
+	ts := httptest.NewServer(newTestHTTPServer(t, "", fs))
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send-email","arguments":{"subject":"s","body":"hi","to":"a@x.com"}}}`
+	status, resp := mcpCall(t, ts.URL, nil, body)
+	if status != 200 {
+		t.Fatalf("status = %d: %s", status, resp)
+	}
+	if !strings.Contains(resp, `"success":true`) {
+		t.Fatalf("string to must pass the SDK schema then normalize: %.300s", resp)
+	}
+}
+
+// TestServer_NullOptionalParamsOverMCP pins null tolerance end-to-end: the
+// handler treats JSON null for the four optional params as absent (multica
+// email fallback for "to"), and the schema must let null reach the handler
+// rather than die at SDK pre-validation with a raw schema error.
+func TestServer_NullOptionalParamsOverMCP(t *testing.T) {
+	fs := &fakeSender{}
+	ts := httptest.NewServer(newTestHTTPServer(t, "", fs))
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send-email","arguments":{"subject":"s","body":"hi","to":null,"cc":null,"body_type":null,"attachments":null}}}`
+	status, resp := mcpCall(t, ts.URL, map[string]string{
+		"X-Multica-User-Email": "user@example.com",
+	}, body)
+	if status != 200 {
+		t.Fatalf("status = %d: %s", status, resp)
+	}
+	if !strings.Contains(resp, `"success":true`) {
+		t.Fatalf("null optional params must pass schema and fall back to multica email: %.300s", resp)
+	}
+}
+
+// TestServer_InvalidParamRejectedBySchema pins that SDK pre-validation is
+// actually active: an integer "to" must be rejected as an isError result
+// before the handler runs, proving the explicit schema has teeth.
+func TestServer_InvalidParamRejectedBySchema(t *testing.T) {
+	fs := &fakeSender{}
+	ts := httptest.NewServer(newTestHTTPServer(t, "", fs))
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send-email","arguments":{"subject":"s","body":"hi","to":42}}}`
+	status, resp := mcpCall(t, ts.URL, nil, body)
+	if status != 200 {
+		t.Fatalf("status = %d: %s", status, resp)
+	}
+	if !strings.Contains(resp, `"isError":true`) {
+		t.Fatalf("schema rejection must surface as isError result: %.300s", resp)
+	}
+	if !strings.Contains(resp, "validating") {
+		t.Fatalf("expected SDK validation error text: %.300s", resp)
 	}
 }
