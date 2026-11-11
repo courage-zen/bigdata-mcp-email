@@ -72,7 +72,9 @@ args["attachments"] 为 string
   都不给 → INVALID_PARAM_VALUE
   都需为 string，非 string → INVALID_PARAM_TYPE
   content_b64 形态：filename 仍必填 → MISSING_FILENAME（错误信息提示 s3_key 形态会自动补）
-  s3_key 形态：filename 缺省 → path.Base(key)；Base 为 "." 或 key 为空 → INVALID_PARAM_VALUE
+  s3_key 形态：key 去首尾空白后为空或以 / 结尾（目录形态）→ INVALID_PARAM_VALUE
+    （须在取 Base 前显式拒绝：Go 的 path.Base 会剥掉尾斜杠，"a/b/" 会得到 "b" 而非 "."）
+  filename 缺省 → path.Base(key)（通过上述校验后必有非空段）
   size 校验统一放在内容取得之后（两种形态一致，超限即中止不再读后续附件）
 ```
 
