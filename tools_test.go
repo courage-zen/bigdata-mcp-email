@@ -142,7 +142,7 @@ func TestSendEmail_NoRecipient(t *testing.T) {
 	if msg == "" {
 		t.Error("error message must explain both sources were empty")
 	}
-	if msg, _ := out["error"].(string); !strings.Contains(msg, "user_email") {
+	if !strings.Contains(msg, "user_email") {
 		t.Errorf("error should mention user_email: %q", msg)
 	}
 	if code, _ := out["error_code"].(string); code != "MISSING_PARAM" {
