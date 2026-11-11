@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 )
@@ -18,6 +20,7 @@ type MailSender interface {
 type ServerEnv struct {
 	Config *Config
 	Sender MailSender
+	Store  ObjectStore // nil = s3_key attachments unavailable
 }
 
 // sendEmailInput is the typed MCP tool input (schema inferred by the SDK).
@@ -216,10 +219,21 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	}
 
 	// --- attachments ---------------------------------------------------------
+	// Two source shapes: inline base64 (content_b64) or an object-store
+	// reference (s3_key). A string attachments value is parsed as JSON first
+	// (proxy frameworks without schema awareness serialize arrays as strings).
 	var attachments []Attachment
+	limitBytes := int64(env.Config.MaxAttachmentMB) * 1024 * 1024
 	if v, present := args["attachments"]; present && v != nil {
-		rawList, ok := v.([]any)
-		if !ok {
+		var rawList []any
+		switch x := v.(type) {
+		case string:
+			if err := json.Unmarshal([]byte(x), &rawList); err != nil {
+				return fail(errCodeInvalidParamType, "parameter \"attachments\" is a string but not valid JSON array: %v", err)
+			}
+		case []any:
+			rawList = x
+		default:
 			return fail(errCodeInvalidParamType, "parameter \"attachments\" must be an array of objects, got %T", v)
 		}
 		for i, raw := range rawList {
@@ -227,25 +241,15 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 			if !ok {
 				return fail(errCodeInvalidParamType, "attachments[%d] must be an object", i)
 			}
-			filename, _ := m["filename"].(string)
-			if strings.TrimSpace(filename) == "" {
-				return fail(errCodeMissingFilename, "attachments[%d].filename is required", i)
-			}
-			b64, _ := m["content_b64"].(string)
-			content, err := base64.StdEncoding.DecodeString(b64)
+			att, err := resolveAttachment(env, m, i, limitBytes)
 			if err != nil {
-				return fail(errCodeInvalidBase64, "attachments[%d].content_b64 is not valid base64: %v", i, err)
+				var ae *attachmentError
+				if errors.As(err, &ae) {
+					return fail(ae.code, "%s", ae.msg)
+				}
+				return fail(errCodeInternal, "attachments[%d]: %v", i, err)
 			}
-			limitBytes := int64(env.Config.MaxAttachmentMB) * 1024 * 1024
-			if int64(len(content)) > limitBytes {
-				return fail(errCodeAttachmentTooLarge, "attachment %q is %d bytes, exceeding the %d MiB limit", filename, len(content), env.Config.MaxAttachmentMB)
-			}
-			ct, _ := m["content_type"].(string)
-			attachments = append(attachments, Attachment{
-				Filename:    filename,
-				Content:     content,
-				ContentType: ct,
-			})
+			attachments = append(attachments, att)
 		}
 	}
 
@@ -291,6 +295,106 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 		return errPayload(errCodeInternal, "marshal result: "+err.Error(), mc), nil
 	}
 	return raw, nil
+}
+
+// attachmentError carries a tool error code through resolveAttachment; the
+// SendEmail caller unpacks it into an errPayload via fail.
+type attachmentError struct {
+	code string
+	msg  string
+}
+
+func (e *attachmentError) Error() string { return e.msg }
+
+// resolveAttachment builds one Attachment from a raw argument map. Exactly
+// one of content_b64 / s3_key must be present; filename defaults to the
+// s3 key's base name. limitBytes caps the decoded/object size.
+func resolveAttachment(env *ServerEnv, m map[string]any, i int, limitBytes int64) (Attachment, error) {
+	fail := func(code, format string, a ...any) error {
+		return &attachmentError{code: code, msg: fmt.Sprintf(format, a...)}
+	}
+
+	b64Raw, hasB64 := m["content_b64"]
+	s3keyRaw, hasS3 := m["s3_key"]
+	if hasB64 {
+		if _, ok := b64Raw.(string); !ok {
+			return Attachment{}, fail(errCodeInvalidParamType, "attachments[%d].content_b64 must be a string, got %T", i, b64Raw)
+		}
+	}
+	if hasS3 {
+		if _, ok := s3keyRaw.(string); !ok {
+			return Attachment{}, fail(errCodeInvalidParamType, "attachments[%d].s3_key must be a string, got %T", i, s3keyRaw)
+		}
+	}
+	b64, _ := b64Raw.(string)
+	s3key, _ := s3keyRaw.(string)
+	s3key = strings.TrimSpace(s3key)
+	b64 = strings.TrimSpace(b64) // tolerate caller-wrapped base64 whitespace
+
+	if hasB64 && hasS3 {
+		return Attachment{}, fail(errCodeInvalidParamValue, "attachments[%d]: give exactly one of content_b64 or s3_key, got both", i)
+	}
+	if !hasB64 && !hasS3 {
+		return Attachment{}, fail(errCodeInvalidParamValue, "attachments[%d]: content_b64 or s3_key is required", i)
+	}
+
+	filename, _ := m["filename"].(string)
+	if v, present := m["filename"]; present {
+		s, ok := v.(string)
+		if !ok {
+			return Attachment{}, fail(errCodeInvalidParamType, "attachments[%d].filename must be a string, got %T", i, v)
+		}
+		if strings.TrimSpace(s) == "" {
+			return Attachment{}, fail(errCodeInvalidParamType, "attachments[%d].filename must be a non-empty string", i)
+		}
+		filename = s
+	}
+
+	var content []byte
+	if hasB64 {
+		if strings.TrimSpace(filename) == "" {
+			return Attachment{}, fail(errCodeMissingFilename, "attachments[%d].filename is required for content_b64 attachments (s3_key attachments derive it from the key)", i)
+		}
+		var err error
+		content, err = base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return Attachment{}, fail(errCodeInvalidBase64, "attachments[%d].content_b64 is not valid base64: %v", i, err)
+		}
+	} else {
+		if s3key == "" {
+			return Attachment{}, fail(errCodeInvalidParamValue, "attachments[%d].s3_key must be a non-empty string", i)
+		}
+		// Reject directory-ish keys before the basename fallback: Go's
+		// path.Base strips trailing slashes, so "a/b/" would yield the
+		// misleading name "b" rather than ".".
+		if strings.HasPrefix(s3key, "/") || strings.HasSuffix(s3key, "/") {
+			return Attachment{}, fail(errCodeInvalidParamValue, "attachments[%d].s3_key %q must not start or end with \"/\"", i, s3key)
+		}
+		if filename == "" {
+			filename = path.Base(s3key)
+		}
+		if env.Store == nil {
+			return Attachment{}, fail(errCodeS3Unavailable, "s3 attachments are not configured (add the s3 section to config)")
+		}
+		var err error
+		content, err = env.Store.Get(s3key, limitBytes)
+		if err != nil {
+			if errors.Is(err, ErrObjectNotFound) {
+				return Attachment{}, fail(errCodeS3ObjectNotFound, "attachments[%d].s3_key: %v", i, err)
+			}
+			if errors.Is(err, ErrObjectTooLarge) {
+				return Attachment{}, fail(errCodeAttachmentTooLarge, "attachments[%d] (s3_key %q) exceeds the %d MiB limit", i, s3key, env.Config.MaxAttachmentMB)
+			}
+			return Attachment{}, fail(errCodeS3FetchFailed, "attachments[%d].s3_key: %v", i, err)
+		}
+	}
+
+	if int64(len(content)) > limitBytes {
+		return Attachment{}, fail(errCodeAttachmentTooLarge, "attachment %q is %d bytes, exceeding the %d MiB limit", filename, len(content), env.Config.MaxAttachmentMB)
+	}
+
+	ct, _ := m["content_type"].(string)
+	return Attachment{Filename: filename, Content: content, ContentType: ct}, nil
 }
 
 // envelopeRecipients concatenates to + cc for RCPT TO.

@@ -23,6 +23,26 @@ func (f *fakeSender) Send(from string, to []string, msg []byte) error {
 	return f.Err
 }
 
+// fakeObjectStore implements ObjectStore with canned data per key.
+type fakeObjectStore struct {
+	objects map[string][]byte
+	err     error // when non-nil, returned for every key
+}
+
+func (f *fakeObjectStore) Get(key string, limit int64) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	data, ok := f.objects[key]
+	if !ok {
+		return nil, ErrObjectNotFound
+	}
+	if int64(len(data)) > limit {
+		return nil, ErrObjectTooLarge
+	}
+	return data, nil
+}
+
 func newToolEnv(t *testing.T) (*ServerEnv, *fakeSender) {
 	t.Helper()
 	fs := &fakeSender{}
@@ -569,5 +589,231 @@ func TestSendEmail_DomainAllowlist_Inactive(t *testing.T) {
 	}
 	if len(fs.To) != 1 || fs.To[0] != "a@anywhere.com" {
 		t.Errorf("envelope to = %v", fs.To)
+	}
+}
+
+func TestSendEmail_AttachmentsStringParses(t *testing.T) {
+	env, fs := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":          "a@x.com",
+		"subject":     "s",
+		"body":        "hi",
+		"attachments": `[{"filename":"x.txt","content_b64":"aGVsbG8="}]`,
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	if got, _ := out["attachment_count"].(float64); got != 1 {
+		t.Errorf("attachment_count = %v, want 1", out["attachment_count"])
+	}
+	if !strings.Contains(string(fs.Msg), "x.txt") {
+		t.Errorf("attachment not sent:\n%s", fs.Msg)
+	}
+}
+
+func TestSendEmail_AttachmentsStringInvalid(t *testing.T) {
+	env, _ := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":          "a@x.com",
+		"subject":     "s",
+		"body":        "hi",
+		"attachments": "not-json",
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for unparseable attachments string")
+	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_TYPE" {
+		t.Errorf("error_code = %q, want INVALID_PARAM_TYPE", code)
+	}
+}
+
+func TestSendEmail_S3Attachment(t *testing.T) {
+	env, fs := newToolEnv(t)
+	env.Store = &fakeObjectStore{objects: map[string][]byte{
+		"workspace-42/reports/销量.xlsx": []byte("xlsx-bytes"),
+	}}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "workspace-42/reports/销量.xlsx",
+		}},
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	if !strings.Contains(string(fs.Msg), "销量.xlsx") {
+		t.Errorf("basename not used as filename:\n%s", fs.Msg)
+	}
+}
+
+func TestSendEmail_S3AttachmentExplicitFilename(t *testing.T) {
+	env, fs := newToolEnv(t)
+	env.Store = &fakeObjectStore{objects: map[string][]byte{"k": []byte("v")}}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"s3_key":   "k",
+			"filename": "report.txt",
+		}},
+	})
+	if out["success"] != true {
+		t.Fatalf("success = %v, err: %v", out["success"], out["error"])
+	}
+	if !strings.Contains(string(fs.Msg), "filename=\"report.txt\"") {
+		t.Errorf("explicit filename not used:\n%s", fs.Msg)
+	}
+}
+
+func TestSendEmail_S3Unavailable(t *testing.T) {
+	env, _ := newToolEnv(t) // Store nil
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "k",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false when s3 is unconfigured")
+	}
+	if code, _ := out["error_code"].(string); code != "S3_UNAVAILABLE" {
+		t.Errorf("error_code = %q, want S3_UNAVAILABLE", code)
+	}
+}
+
+func TestSendEmail_S3ObjectNotFound(t *testing.T) {
+	env, _ := newToolEnv(t)
+	env.Store = &fakeObjectStore{} // empty map
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "missing",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for missing object")
+	}
+	if code, _ := out["error_code"].(string); code != "S3_OBJECT_NOT_FOUND" {
+		t.Errorf("error_code = %q, want S3_OBJECT_NOT_FOUND", code)
+	}
+}
+
+func TestSendEmail_S3TooLarge(t *testing.T) {
+	env, _ := newToolEnv(t)
+	env.Config.MaxAttachmentMB = 1
+	env.Store = &fakeObjectStore{objects: map[string][]byte{"k": make([]byte, 2<<20)}}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "k",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for oversized object")
+	}
+	if code, _ := out["error_code"].(string); code != "ATTACHMENT_TOO_LARGE" {
+		t.Errorf("error_code = %q, want ATTACHMENT_TOO_LARGE", code)
+	}
+}
+
+func TestSendEmail_S3FetchFailed(t *testing.T) {
+	env, _ := newToolEnv(t)
+	env.Store = &fakeObjectStore{err: fmt.Errorf("dial: connection refused")}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "k",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for store failure")
+	}
+	if code, _ := out["error_code"].(string); code != "S3_FETCH_FAILED" {
+		t.Errorf("error_code = %q, want S3_FETCH_FAILED", code)
+	}
+}
+
+func TestSendEmail_AttachmentBothSources(t *testing.T) {
+	env, _ := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"s3_key":      "k",
+			"content_b64": "aGVsbG8=",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for both sources given")
+	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_VALUE" {
+		t.Errorf("error_code = %q, want INVALID_PARAM_VALUE", code)
+	}
+}
+
+func TestSendEmail_AttachmentNoSource(t *testing.T) {
+	env, _ := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"filename": "x.txt",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for no source given")
+	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_VALUE" {
+		t.Errorf("error_code = %q, want INVALID_PARAM_VALUE", code)
+	}
+}
+
+func TestSendEmail_S3KeyTrailingSlash(t *testing.T) {
+	env, _ := newToolEnv(t)
+	env.Store = &fakeObjectStore{objects: map[string][]byte{"a/b": []byte("v")}}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "workspace-42/reports/",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for trailing-slash key")
+	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_VALUE" {
+		t.Errorf("error_code = %q, want INVALID_PARAM_VALUE", code)
+	}
+}
+
+func TestSendEmail_ContentB64MissingFilename(t *testing.T) {
+	env, _ := newToolEnv(t)
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to":      "a@x.com",
+		"subject": "s",
+		"body":    "hi",
+		"attachments": []any{map[string]any{
+			"content_b64": "aGVsbG8=",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for missing filename")
+	}
+	if code, _ := out["error_code"].(string); code != "MISSING_FILENAME" {
+		t.Errorf("error_code = %q, want MISSING_FILENAME", code)
 	}
 }

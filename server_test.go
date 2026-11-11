@@ -20,7 +20,7 @@ func newTestHTTPServer(t *testing.T, authKeys string, fs MailSender) http.Handle
 		SMTP:            SMTPConfig{Host: "h", Port: 1, From: "noreply@example.com"},
 		MaxAttachmentMB: 10,
 	}
-	env := &ServerEnv{Config: cfg, Sender: fs}
+	env := &ServerEnv{Config: cfg, Sender: fs, Store: nil}
 	return NewHandler(env, authKeys)
 }
 
