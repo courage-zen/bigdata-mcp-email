@@ -18,7 +18,7 @@ func NewHandler(env *ServerEnv, authKeys string) http.Handler {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.1.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.2.0"}, nil)
 	tool := &mcp.Tool{
 		Name: "send-email",
 		Description: fmt.Sprintf("Send an email via the configured SMTP relay. Attachments (max %d MiB each) come in two shapes: inline base64 ({\"filename\": \"x.xlsx\", \"content_b64\": \"...\"}) or an object-store reference ({\"s3_key\": \"workspace-42/reports/x.xlsx\"} — filename defaults to the key's base name; requires the s3 config section). If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails.",
