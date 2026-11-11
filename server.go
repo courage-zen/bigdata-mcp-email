@@ -35,7 +35,7 @@ func NewHandler(env *ServerEnv, authKeys string) http.Handler {
 				// {"type":"object"}) rejects non-object arguments before the
 				// handler runs, so this is normally unreachable — but keep it
 				// correct rather than malformed.
-				payload := errPayload("invalid arguments: "+err.Error(), mc)
+				payload := errPayload(errCodeInvalidArguments, "invalid arguments: "+err.Error(), mc)
 				return &mcp.CallToolResult{
 					IsError:           true,
 					Content:           []mcp.Content{&mcp.TextContent{Text: string(payload)}},

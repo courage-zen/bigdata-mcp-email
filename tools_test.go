@@ -142,8 +142,11 @@ func TestSendEmail_NoRecipient(t *testing.T) {
 	if msg == "" {
 		t.Error("error message must explain both sources were empty")
 	}
-	if !strings.Contains(msg, "user_email") {
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "user_email") {
 		t.Errorf("error should mention user_email: %q", msg)
+	}
+	if code, _ := out["error_code"].(string); code != "MISSING_PARAM" {
+		t.Errorf("error_code = %q, want %q", code, "MISSING_PARAM")
 	}
 }
 
@@ -176,6 +179,9 @@ func TestSendEmail_MissingSubject(t *testing.T) {
 	if msg, _ := out["error"].(string); !strings.Contains(msg, "subject") {
 		t.Errorf("error should name subject: %q", msg)
 	}
+	if code, _ := out["error_code"].(string); code != "MISSING_PARAM" {
+		t.Errorf("error_code = %q, want %q", code, "MISSING_PARAM")
+	}
 }
 
 func TestSendEmail_MissingBody(t *testing.T) {
@@ -186,6 +192,9 @@ func TestSendEmail_MissingBody(t *testing.T) {
 	})
 	if out["success"] != false {
 		t.Fatal("success must be false without body")
+	}
+	if code, _ := out["error_code"].(string); code != "MISSING_PARAM" {
+		t.Errorf("error_code = %q, want %q", code, "MISSING_PARAM")
 	}
 }
 
@@ -198,6 +207,9 @@ func TestSendEmail_InvalidEmail(t *testing.T) {
 	})
 	if out["success"] != false {
 		t.Fatal("success must be false for invalid to")
+	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_VALUE" {
+		t.Errorf("error_code = %q, want %q", code, "INVALID_PARAM_VALUE")
 	}
 }
 
@@ -215,6 +227,9 @@ func TestSendEmail_BadBase64Attachment(t *testing.T) {
 	if out["success"] != false {
 		t.Fatal("success must be false for undecodable base64")
 	}
+	if code, _ := out["error_code"].(string); code != "INVALID_BASE64" {
+		t.Errorf("error_code = %q, want %q", code, "INVALID_BASE64")
+	}
 }
 
 func TestSendEmail_AttachmentsWrongType(t *testing.T) {
@@ -231,6 +246,9 @@ func TestSendEmail_AttachmentsWrongType(t *testing.T) {
 	if msg, _ := out["error"].(string); !strings.Contains(msg, "attachments") {
 		t.Errorf("error should name attachments: %q", msg)
 	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_TYPE" {
+		t.Errorf("error_code = %q, want %q", code, "INVALID_PARAM_TYPE")
+	}
 }
 
 func TestSendEmail_BodyTypeWrongType(t *testing.T) {
@@ -246,6 +264,9 @@ func TestSendEmail_BodyTypeWrongType(t *testing.T) {
 	}
 	if msg, _ := out["error"].(string); !strings.Contains(msg, "body_type") {
 		t.Errorf("error should name body_type: %q", msg)
+	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_TYPE" {
+		t.Errorf("error_code = %q, want %q", code, "INVALID_PARAM_TYPE")
 	}
 }
 
@@ -265,6 +286,9 @@ func TestSendEmail_AttachmentTooBig(t *testing.T) {
 	if out["success"] != false {
 		t.Fatal("2MB attachment must fail 1MB cap")
 	}
+	if code, _ := out["error_code"].(string); code != "ATTACHMENT_TOO_LARGE" {
+		t.Errorf("error_code = %q, want %q", code, "ATTACHMENT_TOO_LARGE")
+	}
 }
 
 func TestSendEmail_SenderFailure(t *testing.T) {
@@ -280,6 +304,9 @@ func TestSendEmail_SenderFailure(t *testing.T) {
 	}
 	if msg, _ := out["error"].(string); !strings.Contains(msg, "smtp") {
 		t.Errorf("error should mention smtp: %q", msg)
+	}
+	if code, _ := out["error_code"].(string); code != "SMTP_FAILED" {
+		t.Errorf("error_code = %q, want %q", code, "SMTP_FAILED")
 	}
 }
 
@@ -417,6 +444,9 @@ func TestSendEmail_DomainAllowlist_BlockedTo(t *testing.T) {
 	if fs.To != nil || fs.Msg != nil {
 		t.Errorf("nothing must be sent when rejected (to=%v, msg set=%v)", fs.To, fs.Msg != nil)
 	}
+	if code, _ := out["error_code"].(string); code != "DOMAIN_NOT_ALLOWED" {
+		t.Errorf("error_code = %q, want %q", code, "DOMAIN_NOT_ALLOWED")
+	}
 }
 
 func TestSendEmail_DomainAllowlist_BlockedCc(t *testing.T) {
@@ -437,6 +467,9 @@ func TestSendEmail_DomainAllowlist_BlockedCc(t *testing.T) {
 	if !strings.Contains(errMsg, `"b@evil.com"`) {
 		t.Errorf("error must name the rejected cc address (quoted), got: %q", errMsg)
 	}
+	if code, _ := out["error_code"].(string); code != "DOMAIN_NOT_ALLOWED" {
+		t.Errorf("error_code = %q, want %q", code, "DOMAIN_NOT_ALLOWED")
+	}
 }
 
 func TestSendEmail_DomainAllowlist_BlockedFallback(t *testing.T) {
@@ -454,6 +487,9 @@ func TestSendEmail_DomainAllowlist_BlockedFallback(t *testing.T) {
 	errMsg, _ := out["error"].(string)
 	if !strings.Contains(errMsg, `"user@outside.com"`) {
 		t.Errorf("error must name the rejected fallback address (quoted), got: %q", errMsg)
+	}
+	if code, _ := out["error_code"].(string); code != "DOMAIN_NOT_ALLOWED" {
+		t.Errorf("error_code = %q, want %q", code, "DOMAIN_NOT_ALLOWED")
 	}
 }
 
@@ -476,6 +512,9 @@ func TestSendEmail_DomainAllowlist_MixedBlocked(t *testing.T) {
 	}
 	if fs.To != nil || fs.Msg != nil {
 		t.Errorf("nothing must be sent when rejected (to=%v, msg set=%v)", fs.To, fs.Msg != nil)
+	}
+	if code, _ := out["error_code"].(string); code != "DOMAIN_NOT_ALLOWED" {
+		t.Errorf("error_code = %q, want %q", code, "DOMAIN_NOT_ALLOWED")
 	}
 }
 

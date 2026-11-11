@@ -44,6 +44,25 @@ type attachmentArg struct {
 // For the MCP registration path we use the raw-JSON Server.AddTool with our
 // own normalization, keeping string-or-array flexibility.
 
+// Error codes carried in failed tool payloads' error_code field, for
+// programmatic handling by callers. See the design doc's error table.
+const (
+	errCodeMissingParam       = "MISSING_PARAM"
+	errCodeInvalidParamType   = "INVALID_PARAM_TYPE"
+	errCodeInvalidParamValue  = "INVALID_PARAM_VALUE"
+	errCodeMissingFilename    = "MISSING_FILENAME"
+	errCodeInvalidBase64      = "INVALID_BASE64"
+	errCodeAttachmentTooLarge = "ATTACHMENT_TOO_LARGE"
+	errCodeDomainNotAllowed   = "DOMAIN_NOT_ALLOWED"
+	errCodeS3Unavailable      = "S3_UNAVAILABLE"
+	errCodeS3ObjectNotFound   = "S3_OBJECT_NOT_FOUND"
+	errCodeS3FetchFailed      = "S3_FETCH_FAILED"
+	errCodeBuildFailed        = "BUILD_FAILED"
+	errCodeSMTPFailed         = "SMTP_FAILED"
+	errCodeInvalidArguments   = "INVALID_ARGUMENTS"
+	errCodeInternal           = "INTERNAL"
+)
+
 // emailResult is the JSON payload returned by the tool.
 type emailResult struct {
 	Success           bool              `json:"success"`
@@ -56,13 +75,15 @@ type emailResult struct {
 	SignatureAppended bool              `json:"signature_appended"`
 	DurationMs        float64           `json:"duration_ms"`
 	Error             string            `json:"error,omitempty"`
+	ErrorCode         string            `json:"error_code,omitempty"`
 	MulticaContext    map[string]string `json:"multica_context"`
 }
 
-func errPayload(errMsg string, mc map[string]string) []byte {
+func errPayload(code, errMsg string, mc map[string]string) []byte {
 	raw, _ := json.Marshal(emailResult{
 		Success:        false,
 		Error:          errMsg,
+		ErrorCode:      code,
 		MulticaContext: mc,
 	})
 	return raw
@@ -116,24 +137,26 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	mc := MulticaContextFromHeaders(hdr)
 	start := time.Now()
 
-	fail := func(format string, a ...any) ([]byte, error) {
-		return errPayload(fmt.Sprintf(format, a...), mc), nil
+	// fail renders a tool-level error payload; code is one of the errCode
+	// constants. Returns a payload, never a protocol error.
+	fail := func(code, format string, a ...any) ([]byte, error) {
+		return errPayload(code, fmt.Sprintf(format, a...), mc), nil
 	}
 
 	// --- normalize arguments -------------------------------------------------
 	subject, _ := args["subject"].(string)
 	if strings.TrimSpace(subject) == "" {
-		return fail("parameter \"subject\" is required")
+		return fail(errCodeMissingParam, "parameter \"subject\" is required")
 	}
 	body, _ := args["body"].(string)
 	if body == "" {
-		return fail("parameter \"body\" is required")
+		return fail(errCodeMissingParam, "parameter \"body\" is required")
 	}
 	bodyType := ""
 	if v, present := args["body_type"]; present && v != nil {
 		s, ok := v.(string)
 		if !ok {
-			return fail("parameter \"body_type\" must be a string, got %T", v)
+			return fail(errCodeInvalidParamType, "parameter \"body_type\" must be a string, got %T", v)
 		}
 		bodyType = s
 	}
@@ -141,16 +164,16 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 		bodyType = "text"
 	}
 	if bodyType != "text" && bodyType != "html" {
-		return fail("parameter \"body_type\" must be \"text\" or \"html\", got %q", bodyType)
+		return fail(errCodeInvalidParamValue, "parameter \"body_type\" must be \"text\" or \"html\", got %q", bodyType)
 	}
 
 	to, err := normalizeRecipients(args["to"])
 	if err != nil {
-		return fail("parameter \"to\": %v", err)
+		return fail(errCodeInvalidParamType, "parameter \"to\": %v", err)
 	}
 	cc, err := normalizeRecipients(args["cc"])
 	if err != nil {
-		return fail("parameter \"cc\": %v", err)
+		return fail(errCodeInvalidParamType, "parameter \"cc\": %v", err)
 	}
 
 	// --- recipient fallback --------------------------------------------------
@@ -158,7 +181,7 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	replyTo := ""
 	if len(to) == 0 {
 		if userEmail == "" {
-			return fail("no recipient: parameter \"to\" is empty and multica header user_email is absent — provide \"to\" or call from a multica task with a resolvable user email")
+			return fail(errCodeMissingParam, "no recipient: parameter \"to\" is empty and multica header user_email is absent — provide \"to\" or call from a multica task with a resolvable user email")
 		}
 		to = []string{userEmail}
 		replyTo = userEmail
@@ -166,7 +189,7 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 
 	for _, addr := range append(append([]string{}, to...), cc...) {
 		if !validEmail(addr) {
-			return fail("invalid email address %q", addr)
+			return fail(errCodeInvalidParamValue, "invalid email address %q", addr)
 		}
 	}
 
@@ -184,7 +207,7 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 			for i, addr := range rejected {
 				quoted[i] = fmt.Sprintf("%q", addr)
 			}
-			return fail("recipient domain not allowed: %s not in allowed domains [%s]",
+			return fail(errCodeDomainNotAllowed, "recipient domain not allowed: %s not in allowed domains [%s]",
 				strings.Join(quoted, ", "), strings.Join(env.Config.AllowedDomains, ", "))
 		}
 	}
@@ -194,25 +217,25 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	if v, present := args["attachments"]; present && v != nil {
 		rawList, ok := v.([]any)
 		if !ok {
-			return fail("parameter \"attachments\" must be an array of objects, got %T", v)
+			return fail(errCodeInvalidParamType, "parameter \"attachments\" must be an array of objects, got %T", v)
 		}
 		for i, raw := range rawList {
 			m, ok := raw.(map[string]any)
 			if !ok {
-				return fail("attachments[%d] must be an object", i)
+				return fail(errCodeInvalidParamType, "attachments[%d] must be an object", i)
 			}
 			filename, _ := m["filename"].(string)
 			if strings.TrimSpace(filename) == "" {
-				return fail("attachments[%d].filename is required", i)
+				return fail(errCodeMissingFilename, "attachments[%d].filename is required", i)
 			}
 			b64, _ := m["content_b64"].(string)
 			content, err := base64.StdEncoding.DecodeString(b64)
 			if err != nil {
-				return fail("attachments[%d].content_b64 is not valid base64: %v", i, err)
+				return fail(errCodeInvalidBase64, "attachments[%d].content_b64 is not valid base64: %v", i, err)
 			}
 			limitBytes := int64(env.Config.MaxAttachmentMB) * 1024 * 1024
 			if int64(len(content)) > limitBytes {
-				return fail("attachment %q is %d bytes, exceeding the %d MiB limit", filename, len(content), env.Config.MaxAttachmentMB)
+				return fail(errCodeAttachmentTooLarge, "attachment %q is %d bytes, exceeding the %d MiB limit", filename, len(content), env.Config.MaxAttachmentMB)
 			}
 			ct, _ := m["content_type"].(string)
 			attachments = append(attachments, Attachment{
@@ -241,11 +264,11 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	}
 	msg, err := BuildMessage(email)
 	if err != nil {
-		return fail("build message: %v", err)
+		return fail(errCodeBuildFailed, "build message: %v", err)
 	}
 
 	if err := env.Sender.Send(env.Config.SMTP.From, envelopeRecipients(to, cc), msg); err != nil {
-		return fail("smtp send failed: %v", err)
+		return fail(errCodeSMTPFailed, "smtp send failed: %v", err)
 	}
 
 	result := emailResult{
@@ -262,7 +285,7 @@ func (env *ServerEnv) SendEmail(hdr http.Header, args map[string]any) ([]byte, e
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
-		return errPayload("marshal result: "+err.Error(), mc), nil
+		return errPayload(errCodeInternal, "marshal result: "+err.Error(), mc), nil
 	}
 	return raw, nil
 }
