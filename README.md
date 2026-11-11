@@ -70,12 +70,15 @@ s3:                    # optional; omit = s3_key attachments disabled
   access_key: "..."
   secret_key: "..."
   bucket: "multica-artifacts"
+  secure: false
 ```
 
 Environment variables override the file: `SMTP_HOST` `SMTP_PORT` `SMTP_FROM`
 `MAX_ATTACHMENT_MB`, and `ALLOWED_DOMAINS` (comma-separated) overrides the
 `allowed_domains` file list. `S3_ENDPOINT` `S3_ACCESS_KEY` `S3_SECRET_KEY`
-`S3_BUCKET` `S3_SECURE` override the file's `s3` section. Server env:
+`S3_BUCKET` `S3_SECURE` override the file's `s3` section, but only when that
+section is present — a minimal `s3:` section (at least one of the four
+required fields) must exist for them to take effect. Server env:
 `MCP_AUTH_KEY` (comma-separated bearer keys;
 unset = no auth), `MCP_HOST` (default 0.0.0.0), `MCP_PORT` (default 8000).
 `/health` is exempt from auth. `smtp.from` (or `SMTP_FROM`) is required — the
@@ -137,9 +140,12 @@ machine-readable `error_code` (e.g. `S3_OBJECT_NOT_FOUND`,
 Direct HTTP callers (bypassing the proxy) can set `X-Multica-*` headers
 themselves to get task context echoed in `multica_context` for tracing.
 
+### Response
+
 Returns JSON: `success`, `message_id`, `to`, `cc`, `from`, `reply_to`,
 `attachment_count`, `signature_appended`, `duration_ms`, `multica_context`;
-`error` is present on failure (omitted on success).
+`error` is present on failure (omitted on success), alongside
+`error_code` (machine-readable, on failure).
 
 When `X-Multica-Agent-Name` and `X-Multica-Workspace-Name` both carry a
 non-empty value, this block is appended to the end of the body:
