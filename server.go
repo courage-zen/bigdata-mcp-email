@@ -18,10 +18,10 @@ func NewHandler(env *ServerEnv, authKeys string) http.Handler {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.2.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.2.1"}, nil)
 	tool := &mcp.Tool{
 		Name: "send-email",
-		Description: fmt.Sprintf("Send an email via the configured SMTP relay. Attachments (max %d MiB each) come in two shapes: inline base64 ({\"filename\": \"x.xlsx\", \"content_b64\": \"...\"}) or an object-store reference ({\"s3_key\": \"workspace-42/reports/x.xlsx\"} — filename defaults to the key's base name; requires the s3 config section). If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails.",
+		Description: fmt.Sprintf("Send an email via the configured SMTP relay (subject and body required; body is plain text or HTML per body_type, default \"text\"). Attachments (max %d MiB each) come in two mutually exclusive shapes: inline base64 ({\"filename\": \"x.xlsx\", \"content_b64\": \"...\"} — filename required) or an object-store reference ({\"s3_key\": \"workspace-42/reports/x.xlsx\"} — filename defaults to the key's base name; requires the s3 config section). If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails. Failed calls return success:false with a human-readable \"error\" and a machine-readable \"error_code\".",
 			env.Config.MaxAttachmentMB),
 		InputSchema: json.RawMessage(inputSchemaJSON),
 	}
@@ -120,7 +120,8 @@ const inputSchemaJSON = `{
       "anyOf": [
         {"type": "string", "enum": ["text", "html"], "description": "body rendering; default \"text\""},
         {"type": "null"}
-      ]
+      ],
+      "description": "body rendering: \"text\" or \"html\"; default \"text\""
     },
     "attachments": {
       "anyOf": [
