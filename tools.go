@@ -23,30 +23,6 @@ type ServerEnv struct {
 	Store  ObjectStore // nil = s3_key attachments unavailable
 }
 
-// sendEmailInput is the typed MCP tool input (schema inferred by the SDK).
-type sendEmailInput struct {
-	To          []string        `json:"to,omitempty" jsonschema:"recipients; empty to fall back to the multica user's email"`
-	Cc          []string        `json:"cc,omitempty" jsonschema:"carbon-copy recipients"`
-	Subject     string          `json:"subject" jsonschema:"email subject line"`
-	Body        string          `json:"body" jsonschema:"email body (plain text or HTML per body_type)"`
-	BodyType    string          `json:"body_type,omitempty" jsonschema:"\"text\" or \"html\"; default \"text\""`
-	Attachments []attachmentArg `json:"attachments,omitempty" jsonschema:"optional attachments"`
-}
-
-type attachmentArg struct {
-	Filename    string `json:"filename" jsonschema:"attachment file name shown to the recipient"`
-	ContentB64  string `json:"content_b64" jsonschema:"base64-encoded attachment content"`
-	ContentType string `json:"content_type,omitempty" jsonschema:"MIME type; guessed from filename when empty"`
-}
-
-// attachmentArg needs custom unmarshaling: to/cc accept string-or-array.
-// The SDK validates against the inferred schema, so we declare []string and
-// normalize string→[]string before validation via a raw pre-step in the
-// handler (see SendEmail: arguments arrive as map[string]any there).
-//
-// For the MCP registration path we use the raw-JSON Server.AddTool with our
-// own normalization, keeping string-or-array flexibility.
-
 // Error codes carried in failed tool payloads' error_code field, for
 // programmatic handling by callers. See the design doc's error table.
 const (

@@ -190,3 +190,42 @@ func TestServer_LargeAttachmentUnderConfigLimit(t *testing.T) {
 		t.Fatalf("no success: %.200s", resp)
 	}
 }
+
+func TestServer_ToolSchemaExposed(t *testing.T) {
+	fs := &fakeSender{}
+	ts := httptest.NewServer(newTestHTTPServer(t, "", fs))
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
+	status, resp := mcpCall(t, ts.URL, nil, body)
+	if status != 200 {
+		t.Fatalf("status = %d: %s", status, resp)
+	}
+	for _, want := range []string{
+		`"subject"`, `"body"`, `"body_type"`, `"to"`, `"cc"`,
+		`"attachments"`, `"filename"`, `"content_b64"`, `"content_type"`, `"s3_key"`,
+		`"anyOf"`,
+	} {
+		if !strings.Contains(resp, want) {
+			t.Errorf("tools/list schema missing %s: %.500s", want, resp)
+		}
+	}
+}
+
+func TestServer_StringAttachmentsOverMCP(t *testing.T) {
+	fs := &fakeSender{}
+	ts := httptest.NewServer(newTestHTTPServer(t, "", fs))
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send-email","arguments":{"subject":"s","body":"hi","to":["a@x.com"],"attachments":"[{\"filename\":\"x.txt\",\"content_b64\":\"aGVsbG8=\"}]"}}}`
+	status, resp := mcpCall(t, ts.URL, nil, body)
+	if status != 200 {
+		t.Fatalf("status = %d: %s", status, resp)
+	}
+	if !strings.Contains(resp, `"success":true`) {
+		t.Fatalf("string attachments must pass the SDK schema then parse: %.300s", resp)
+	}
+	if !strings.Contains(resp, `"attachment_count":1`) {
+		t.Fatalf("attachment not sent: %.300s", resp)
+	}
+}

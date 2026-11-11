@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -18,10 +19,13 @@ func NewHandler(env *ServerEnv, authKeys string) http.Handler {
 	})
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.1.0"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "send-email",
-		Description: "Send an email via the configured SMTP relay. If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in any) (*mcp.CallToolResult, any, error) {
+	tool := &mcp.Tool{
+		Name: "send-email",
+		Description: fmt.Sprintf("Send an email via the configured SMTP relay. Attachments (max %d MiB each) come in two shapes: inline base64 ({\"filename\": \"x.xlsx\", \"content_b64\": \"...\"}) or an object-store reference ({\"s3_key\": \"workspace-42/reports/x.xlsx\"} — filename defaults to the key's base name; requires the s3 config section). If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails.",
+			env.Config.MaxAttachmentMB),
+		InputSchema: json.RawMessage(inputSchemaJSON),
+	}
+	mcp.AddTool(server, tool, func(ctx context.Context, req *mcp.CallToolRequest, in any) (*mcp.CallToolResult, any, error) {
 		var hdr map[string][]string
 		if req.Extra != nil && req.Extra.Header != nil {
 			hdr = req.Extra.Header
@@ -83,3 +87,51 @@ func jsonPayloadSuccess(payload []byte) bool {
 	}
 	return json.Unmarshal(payload, &probe) == nil && probe.Success
 }
+
+// inputSchemaJSON is the deliberately-lenient tool schema. Required-ness,
+// content_b64/s3_key exclusivity and filename defaults are enforced by the
+// handler (uniform error_code payloads), not by the schema — so those
+// violations reach callers as readable tool errors rather than SDK schema
+// rejections. The anyOf string forms let schema-less proxy frameworks
+// pass array params as JSON strings through SDK pre-validation, where the
+// handler's JSON.parse tolerance takes over.
+const inputSchemaJSON = `{
+  "type": "object",
+  "properties": {
+    "to": {
+      "anyOf": [
+        {"type": "string", "description": "recipient, or comma-separated recipients"},
+        {"type": "array", "items": {"type": "string"}, "description": "recipient addresses"}
+      ],
+      "description": "recipients; empty falls back to the multica caller's email"
+    },
+    "cc": {
+      "anyOf": [
+        {"type": "string", "description": "carbon-copy address, or comma-separated addresses"},
+        {"type": "array", "items": {"type": "string"}, "description": "carbon-copy addresses"}
+      ],
+      "description": "carbon-copy recipients; optional"
+    },
+    "subject": {"type": "string", "description": "email subject line (required)"},
+    "body": {"type": "string", "description": "email body, plain text or HTML per body_type (required)"},
+    "body_type": {"type": "string", "enum": ["text", "html"], "description": "body rendering; default \"text\""},
+    "attachments": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "filename": {"type": "string", "description": "attachment name shown to the recipient; defaults to the s3_key base name (required for content_b64)"},
+              "content_b64": {"type": "string", "description": "base64-encoded attachment content (mutually exclusive with s3_key)"},
+              "content_type": {"type": "string", "description": "MIME type; guessed from filename when empty"},
+              "s3_key": {"type": "string", "description": "object key in the configured bucket; mutually exclusive with content_b64"}
+            }
+          }
+        },
+        {"type": "string", "description": "JSON-encoded array of attachment objects (tolerated for schema-less proxies)"}
+      ],
+      "description": "optional attachments, max size per attachment from config"
+    }
+  }
+}`
