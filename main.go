@@ -28,8 +28,19 @@ func main() {
 	}
 
 	env := &ServerEnv{Config: cfg, Sender: &SMTPSender{Host: cfg.SMTP.Host, Port: cfg.SMTP.Port}}
+	if cfg.S3 != nil {
+		store, err := NewMinioObjectStore(cfg.S3.Endpoint, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.Bucket, cfg.S3.Secure)
+		if err != nil {
+			log.Fatalf("s3: %v", err)
+		}
+		env.Store = store
+	}
 	addr := host + ":" + strconv.Itoa(port)
-	log.Printf("email-mcp listening on %s (smtp %s:%d, from %s)", addr, cfg.SMTP.Host, cfg.SMTP.Port, cfg.SMTP.From)
+	s3State := "off"
+	if env.Store != nil {
+		s3State = cfg.S3.Bucket
+	}
+	log.Printf("email-mcp listening on %s (smtp %s:%d, from %s, s3 %s)", addr, cfg.SMTP.Host, cfg.SMTP.Port, cfg.SMTP.From, s3State)
 	// ReadHeaderTimeout is the slowloris guard: the server binds 0.0.0.0 by
 	// default, so slow-header clients must not be able to pin connections
 	// open forever. Everything else is deliberately the zero value, matching

@@ -65,11 +65,18 @@ max_attachment_mb: 10   # optional
 allowed_domains:        # optional; omit = no restriction
   - "example.com"
   - "acme.org"
+s3:                    # optional; omit = s3_key attachments disabled
+  endpoint: "minio.internal:9000"
+  access_key: "..."
+  secret_key: "..."
+  bucket: "multica-artifacts"
 ```
 
 Environment variables override the file: `SMTP_HOST` `SMTP_PORT` `SMTP_FROM`
 `MAX_ATTACHMENT_MB`, and `ALLOWED_DOMAINS` (comma-separated) overrides the
-`allowed_domains` file list. Server env: `MCP_AUTH_KEY` (comma-separated bearer keys;
+`allowed_domains` file list. `S3_ENDPOINT` `S3_ACCESS_KEY` `S3_SECRET_KEY`
+`S3_BUCKET` `S3_SECURE` override the file's `s3` section. Server env:
+`MCP_AUTH_KEY` (comma-separated bearer keys;
 unset = no auth), `MCP_HOST` (default 0.0.0.0), `MCP_PORT` (default 8000).
 `/health` is exempt from auth. `smtp.from` (or `SMTP_FROM`) is required — the
 server exits at startup without it.
@@ -105,12 +112,30 @@ The proxy injects the `X-Multica-*` identity headers automatically.
 
 | argument | type | notes |
 |----------|------|-------|
-| `to` | string \| string[] | empty → multica user email |
-| `cc` | string \| string[] | optional |
+| `to` | string \| string[] | empty → multica user email; comma-separated string splits |
+| `cc` | string \| string[] | optional; comma-separated string splits |
 | `subject` | string | required |
 | `body` | string | required |
 | `body_type` | "text" \| "html" | default "text" |
-| `attachments` | array | `{filename, content_b64, content_type?}` |
+| `attachments` | array \| string | `{filename?, content_b64 \| s3_key, content_type?}`; a JSON-encoded array string is also accepted (schema-less proxies) |
+
+### Attachments
+
+Two mutually exclusive sources per attachment:
+
+- `{"filename": "x.xlsx", "content_b64": "..."}` — inline base64; `filename` is required.
+- `{"s3_key": "workspace-42/reports/x.xlsx"}` — object key in the configured
+  bucket; `filename` defaults to the key's base name. Requires the `s3` config
+  section (see Configure); without it, `s3_key` attachments fail with
+  `S3_UNAVAILABLE`.
+
+Size limit per attachment is `max_attachment_mb` (default 10) for both shapes.
+Failed calls return `success: false` with an `error` message and a
+machine-readable `error_code` (e.g. `S3_OBJECT_NOT_FOUND`,
+`ATTACHMENT_TOO_LARGE`, `MISSING_FILENAME`, `INVALID_PARAM_TYPE`).
+
+Direct HTTP callers (bypassing the proxy) can set `X-Multica-*` headers
+themselves to get task context echoed in `multica_context` for tracing.
 
 Returns JSON: `success`, `message_id`, `to`, `cc`, `from`, `reply_to`,
 `attachment_count`, `signature_appended`, `duration_ms`, `multica_context`;
