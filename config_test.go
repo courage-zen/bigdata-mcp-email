@@ -190,3 +190,76 @@ smtp:
 		t.Errorf("allowedDomainSet = %v, want nil (inactive)", cfg.allowedDomainSet)
 	}
 }
+
+func TestLoadConfig_S3FromFile(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+s3:
+  endpoint: "minio.internal:9000"
+  access_key: "AK"
+  secret_key: "SK"
+  bucket: "multica-artifacts"
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cfg.S3
+	if s == nil {
+		t.Fatal("S3 config not loaded")
+	}
+	if s.Endpoint != "minio.internal:9000" || s.AccessKey != "AK" || s.SecretKey != "SK" || s.Bucket != "multica-artifacts" {
+		t.Fatalf("s3 = %+v", *s)
+	}
+	if s.Secure {
+		t.Error("s3.secure must default to false")
+	}
+}
+
+func TestLoadConfig_S3Absent(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.S3 != nil {
+		t.Fatalf("S3 = %+v, want nil (feature off)", *cfg.S3)
+	}
+}
+
+func TestLoadConfig_S3EnvOverrides(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+s3:
+  endpoint: "minio.internal:9000"
+  access_key: "AK"
+  secret_key: "SK"
+  bucket: "multica-artifacts"
+`)
+	t.Setenv("S3_ENDPOINT", "10.9.8.7:9000")
+	t.Setenv("S3_SECURE", "true")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.S3.Endpoint != "10.9.8.7:9000" || !cfg.S3.Secure {
+		t.Fatalf("env override failed: %+v", *cfg.S3)
+	}
+}
+
+func TestLoadConfig_S3Incomplete(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+s3:
+  endpoint: "minio.internal:9000"
+`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("incomplete s3 section must fail at startup, not at first use")
+	}
+}
