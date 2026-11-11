@@ -12,7 +12,9 @@ import (
 
 // newFakeS3 serves GET /{bucket}/{key} with canned behavior per key.
 // Keys: "ok/<n>bytes" → n zero bytes; "404" → S3 NoSuchKey XML error;
-// "err" → connection close (transport error, not an S3 error response).
+// "no-bucket" → 404 with NoSuchBucket (must NOT map to ErrObjectNotFound);
+// "err" → connection close (transport error, not an S3 error response);
+// anything else → 404 NoSuchKey (safe default, no handler panic).
 func newFakeS3(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -27,6 +29,11 @@ func newFakeS3(t *testing.T) (*httptest.Server, string) {
 			_, _ = w.Write([]byte(`<?xml version="1.0"?><Error><Code>NoSuchKey</Code><Message>gone</Message></Error>`))
 			return
 		}
+		if key == "no-bucket" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><Error><Code>NoSuchBucket</Code><Message>no such bucket</Message></Error>`))
+			return
+		}
 		if key == "err" {
 			hj, ok := w.(http.Hijacker)
 			if !ok {
@@ -37,6 +44,13 @@ func newFakeS3(t *testing.T) (*httptest.Server, string) {
 			return
 		}
 		// "ok/<n>"
+		if !strings.HasPrefix(key, "ok/") {
+			// Unexpected keys (too short to slice safely) 404 instead of
+			// panicking the handler goroutine.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><Error><Code>NoSuchKey</Code><Message>gone</Message></Error>`))
+			return
+		}
 		n, err := strconv.Atoi(key[len("ok/"):])
 		if err != nil {
 			t.Fatalf("unexpected key %q", key)
@@ -88,16 +102,34 @@ func TestObjectStore_Get_ObjectNotFound(t *testing.T) {
 func TestObjectStore_Get_TooLarge(t *testing.T) {
 	store := newTestObjectStore(t)
 	_, err := store.Get("ok/10", 5)
-	// ErrObjectTooLarge is returned bare (no key context to add).
 	if !errors.Is(err, ErrObjectTooLarge) {
 		t.Fatalf("err = %v, want ErrObjectTooLarge", err)
+	}
+	// Boundary: exactly at the limit is OK — the limit+1 read distinguishes
+	// "at limit" from "more to come", so this pins that behavior.
+	if _, err := store.Get("ok/5", 5); err != nil {
+		t.Fatalf("at-limit Get err = %v, want nil", err)
 	}
 }
 
 func TestObjectStore_Get_OtherError(t *testing.T) {
 	store := newTestObjectStore(t)
 	_, err := store.Get("err", 1024)
-	if err == nil || err == ErrObjectNotFound || err == ErrObjectTooLarge {
+	if err == nil || errors.Is(err, ErrObjectNotFound) || errors.Is(err, ErrObjectTooLarge) {
 		t.Fatalf("err = %v, want a wrapped transport error", err)
+	}
+}
+
+// TestObjectStore_Get_NoSuchBucket pins that a missing bucket (or any other
+// non-object 404) is a generic error, not ErrObjectNotFound — the operator
+// should hear "check bucket/endpoint", not "check your key".
+func TestObjectStore_Get_NoSuchBucket(t *testing.T) {
+	store := newTestObjectStore(t)
+	_, err := store.Get("no-bucket", 1024)
+	if err == nil {
+		t.Fatal("err = nil, want an error")
+	}
+	if errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("err = %v, want a non-ErrObjectNotFound error (NoSuchBucket)", err)
 	}
 }

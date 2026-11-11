@@ -36,7 +36,12 @@ type MinioObjectStore struct {
 // plaintext trust model) and rejects scheme-prefixed endpoints.
 // Region is set so minio-go signs immediately instead of issuing a
 // GET /{bucket}?location= probe on first use (v7.2.1 does that whenever
-// Region is empty); us-east-1 is MinIO's default region.
+// Region is empty); us-east-1 is MinIO's default region. Assumption: the
+// hardcoded region also disables minio-go's region self-healing (the
+// bucket-location probe that recovers a wrong region only runs when region
+// is empty), so a deployment with a non-default MINIO_REGION would fail
+// every Get with a signature error — an s3.region config option is the
+// future escape hatch.
 // A malformed endpoint is a startup failure: config was validated already,
 // so the caller (main.go) treats the error as fatal.
 func NewMinioObjectStore(endpoint, accessKey, secretKey, bucket string, secure bool) (*MinioObjectStore, error) {
@@ -69,7 +74,7 @@ func (s *MinioObjectStore) Get(key string, limit int64) ([]byte, error) {
 		return nil, mapS3Error(key, err)
 	}
 	if int64(len(data)) > limit {
-		return nil, ErrObjectTooLarge
+		return nil, fmt.Errorf("%w: %s", ErrObjectTooLarge, key)
 	}
 	return data, nil
 }
@@ -78,8 +83,12 @@ func (s *MinioObjectStore) Get(key string, limit int64) ([]byte, error) {
 func mapS3Error(key string, err error) error {
 	resp := minio.ToErrorResponse(err)
 	// ToErrorResponse returns a zero value for transport errors (no XML
-	// error body), so gate on the canonical missing-object codes.
-	if resp.Code == "NoSuchKey" || resp.Code == "NoSuchObject" || resp.StatusCode == 404 {
+	// error body), so gate on the canonical missing-object codes. A bare
+	// 404 is deliberately NOT treated as missing: minio-go synthesizes
+	// Code "NoSuchKey" for 404s on an object (api-error-response.go), so
+	// genuine missing objects still map — while NoSuchBucket or a proxy
+	// 404 falls through to the wrapped error with the real code.
+	if resp.Code == "NoSuchKey" || resp.Code == "NoSuchObject" {
 		return fmt.Errorf("%w: %s", ErrObjectNotFound, key)
 	}
 	return fmt.Errorf("s3 get %q: %w", key, err)
