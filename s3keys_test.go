@@ -190,6 +190,25 @@ func TestResolveInputKey_WrongBucket(t *testing.T) {
 	}
 }
 
+func TestHasDangerousExtension(t *testing.T) {
+	for _, name := range []string{
+		"evil.exe", "evil.EXE", "evil.exe.", "evil.exe...", "evil.CMD.",
+		"payload.dll", "tool.app", "archive.tar.gz.exe",
+	} {
+		if !hasDangerousExtension(name) {
+			t.Errorf("name %q must be flagged", name)
+		}
+	}
+	for _, name := range []string{
+		"report.xlsx", "archive.tar.gz", "evil.txt", "exev", "evil.exe.txt",
+		"", "readme", "evil",
+	} {
+		if hasDangerousExtension(name) {
+			t.Errorf("name %q must not be flagged", name)
+		}
+	}
+}
+
 func TestIsInvalidKey(t *testing.T) {
 	if !IsInvalidKey(invalidKey("test")) {
 		t.Error("IsInvalidKey must recognize its own errors")

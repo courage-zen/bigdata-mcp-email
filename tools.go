@@ -34,7 +34,9 @@ const (
 	errCodeAttachmentTooLarge = "ATTACHMENT_TOO_LARGE"
 	errCodeDomainNotAllowed   = "DOMAIN_NOT_ALLOWED"
 	errCodeS3Unavailable      = "S3_UNAVAILABLE"
+	errCodeS3InvalidKey       = "S3_INVALID_KEY"
 	errCodeS3ObjectNotFound   = "S3_OBJECT_NOT_FOUND"
+	errCodeS3ObjectTooLarge   = "S3_OBJECT_TOO_LARGE"
 	errCodeS3FetchFailed      = "S3_FETCH_FAILED"
 	errCodeBuildFailed        = "BUILD_FAILED"
 	errCodeSMTPFailed         = "SMTP_FAILED"
@@ -340,29 +342,40 @@ func resolveAttachment(env *ServerEnv, m map[string]any, i int, limitBytes int64
 		if s3key == "" {
 			return Attachment{}, fail(errCodeInvalidParamValue, "attachments[%d].s3_key must be a non-empty string", i)
 		}
-		// Reject directory-ish keys before the basename fallback: Go's
-		// path.Base strips trailing slashes, so "a/b/" would yield the
-		// misleading name "b" rather than ".".
-		if strings.HasPrefix(s3key, "/") || strings.HasSuffix(s3key, "/") {
-			return Attachment{}, fail(errCodeInvalidParamValue, "attachments[%d].s3_key %q must not start or end with \"/\"", i, s3key)
+		if env.Store == nil {
+			return Attachment{}, fail(errCodeS3Unavailable, "s3 attachments are not configured (set S3_BUCKET / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)")
+		}
+		s3cfg := env.Config.S3
+		if s3cfg == nil {
+			s3cfg = &S3Config{}
+		}
+		key, err := resolveInputKey(s3key, s3cfg)
+		if err != nil {
+			return Attachment{}, fail(errCodeS3InvalidKey, "attachments[%d].s3_key: %v", i, err)
 		}
 		if filename == "" {
-			filename = path.Base(s3key)
+			filename = path.Base(key)
 		}
-		if env.Store == nil {
-			return Attachment{}, fail(errCodeS3Unavailable, "s3 attachments are not configured (add the s3 section to config)")
-		}
-		var err error
-		content, err = env.Store.Get(s3key, limitBytes)
+		content, err = env.Store.Get(key, limitBytes)
 		if err != nil {
 			if errors.Is(err, ErrObjectNotFound) {
-				return Attachment{}, fail(errCodeS3ObjectNotFound, "attachments[%d].s3_key: %v", i, err)
+				return Attachment{}, fail(errCodeS3ObjectNotFound, "attachments[%d].s3_key: object not found", i)
 			}
-			if errors.Is(err, ErrObjectTooLarge) || errors.Is(err, ErrAttachmentTooLarge) {
-				return Attachment{}, fail(errCodeAttachmentTooLarge, "attachments[%d] (s3_key %q) exceeds the %d MiB limit", i, s3key, env.Config.MaxAttachmentMB)
+			if errors.Is(err, ErrObjectTooLarge) {
+				return Attachment{}, fail(errCodeS3ObjectTooLarge, "attachments[%d] exceeds the S3_MAX_FILE_BYTES limit", i)
+			}
+			if errors.Is(err, ErrAttachmentTooLarge) {
+				return Attachment{}, fail(errCodeAttachmentTooLarge, "attachments[%d] exceeds the %d MiB attachment limit", i, env.Config.MaxAttachmentMB)
 			}
 			return Attachment{}, fail(errCodeS3FetchFailed, "attachments[%d].s3_key: %v", i, err)
 		}
+	}
+
+	// The dangerous-extension blocklist applies to the final filename on
+	// both source paths: an explicit filename must not smuggle past it,
+	// nor must a trailing dot (Windows strips it on save).
+	if hasDangerousExtension(filename) {
+		return Attachment{}, fail(errCodeInvalidParamValue, "attachments[%d].filename %q uses a refused extension", i, filename)
 	}
 
 	if int64(len(content)) > limitBytes {

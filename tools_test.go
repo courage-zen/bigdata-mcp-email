@@ -722,6 +722,10 @@ func TestSendEmail_S3ObjectNotFound(t *testing.T) {
 	if code, _ := out["error_code"].(string); code != "S3_OBJECT_NOT_FOUND" {
 		t.Errorf("error_code = %q, want S3_OBJECT_NOT_FOUND", code)
 	}
+	// Sanitization: the message must not echo the requested key.
+	if msg, _ := out["error"].(string); strings.Contains(msg, "missing") {
+		t.Errorf("error message echoes the key: %s", msg)
+	}
 }
 
 func TestSendEmail_S3TooLarge(t *testing.T) {
@@ -760,6 +764,120 @@ func TestSendEmail_S3FetchFailed(t *testing.T) {
 	}
 	if code, _ := out["error_code"].(string); code != "S3_FETCH_FAILED" {
 		t.Errorf("error_code = %q, want S3_FETCH_FAILED", code)
+	}
+}
+
+func TestSendEmail_S3InvalidKey(t *testing.T) {
+	env, _ := newToolEnv(t)
+	env.Store = &fakeObjectStore{objects: map[string][]byte{}}
+	for _, key := range []string{
+		"/abs/x.xlsx", "a/../b.xlsx", "a//b.xlsx", "payload.exe",
+	} {
+		out := callSendEmail(t, env, http.Header{}, map[string]any{
+			"to": "a@x.com", "subject": "s", "body": "hi",
+			"attachments": []any{map[string]any{"s3_key": key}},
+		})
+		if out["success"] != false {
+			t.Fatalf("key %q must be rejected", key)
+		}
+		if code, _ := out["error_code"].(string); code != "S3_INVALID_KEY" {
+			t.Errorf("key %q: error_code = %q, want S3_INVALID_KEY", key, code)
+		}
+		if msg, _ := out["error"].(string); strings.Contains(msg, key) {
+			t.Errorf("key %q leaked in message: %s", key, msg)
+		}
+	}
+}
+
+func TestSendEmail_S3PresignedURLKey(t *testing.T) {
+	env, _ := newToolEnv(t)
+	env.Store = &fakeObjectStore{objects: map[string][]byte{"workspaces/a/b.xlsx": []byte("v")}}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to": "a@x.com", "subject": "s", "body": "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "http://minio:9000/bucket/workspaces/a/b.xlsx?X-Amz-Signature=x",
+		}},
+	})
+	// No bucket match (fake env has no S3Config bucket): rejected as
+	// invalid, success=false.
+	if out["success"] != false {
+		t.Fatal("URL with unknown bucket must fail")
+	}
+	if code, _ := out["error_code"].(string); code != "S3_INVALID_KEY" {
+		t.Errorf("error_code = %q, want S3_INVALID_KEY", code)
+	}
+}
+
+func TestSendEmail_S3ObjectTooLarge(t *testing.T) {
+	env, _ := newToolEnv(t)
+	env.Store = &fakeObjectStore{err: ErrObjectTooLarge}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to": "a@x.com", "subject": "s", "body": "hi",
+		"attachments": []any{map[string]any{"s3_key": "k"}},
+	})
+	if out["success"] != false {
+		t.Fatal("success must be false for S3-layer oversize")
+	}
+	if code, _ := out["error_code"].(string); code != "S3_OBJECT_TOO_LARGE" {
+		t.Errorf("error_code = %q, want S3_OBJECT_TOO_LARGE", code)
+	}
+}
+
+func TestSendEmail_S3UnavailableBeforeKeyValidation(t *testing.T) {
+	env, _ := newToolEnv(t) // Store nil, Config.S3 nil
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to": "a@x.com", "subject": "s", "body": "hi",
+		"attachments": []any{map[string]any{"s3_key": "payload.exe"}},
+	})
+	// Config problem outranks input problem: unavailable, not invalid key.
+	if code, _ := out["error_code"].(string); code != "S3_UNAVAILABLE" {
+		t.Errorf("error_code = %q, want S3_UNAVAILABLE (config check first)", code)
+	}
+}
+
+func TestSendEmail_FilenameDangerousExtension(t *testing.T) {
+	env, _ := newToolEnv(t)
+	// s3_key benign, explicit filename smuggles the extension.
+	env.Store = &fakeObjectStore{objects: map[string][]byte{"report.xlsx": []byte("v")}}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to": "a@x.com", "subject": "s", "body": "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "report.xlsx", "filename": "evil.exe",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("explicit filename must not smuggle a dangerous extension")
+	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_VALUE" {
+		t.Errorf("error_code = %q, want INVALID_PARAM_VALUE", code)
+	}
+
+	// Same rule for content_b64 (caller-supplied name, same channel).
+	out2 := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to": "a@x.com", "subject": "s", "body": "hi",
+		"attachments": []any{map[string]any{
+			"content_b64": "aGVsbG8=", "filename": "evil.CMD.",
+		}},
+	})
+	if out2["success"] != false {
+		t.Fatal("content_b64 filename must not smuggle a dangerous extension")
+	}
+	if code, _ := out2["error_code"].(string); code != "INVALID_PARAM_VALUE" {
+		t.Errorf("error_code = %q, want INVALID_PARAM_VALUE", code)
+	}
+}
+
+func TestSendEmail_FilenameTrailingDotBypass(t *testing.T) {
+	env, _ := newToolEnv(t)
+	env.Store = &fakeObjectStore{objects: map[string][]byte{"k": []byte("v")}}
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to": "a@x.com", "subject": "s", "body": "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "k", "filename": "evil.exe.",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("trailing-dot filename must not bypass the blocklist")
 	}
 }
 
@@ -814,8 +932,12 @@ func TestSendEmail_S3KeyTrailingSlash(t *testing.T) {
 	if out["success"] != false {
 		t.Fatal("success must be false for trailing-slash key")
 	}
-	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_VALUE" {
-		t.Errorf("error_code = %q, want INVALID_PARAM_VALUE", code)
+	if code, _ := out["error_code"].(string); code != "S3_INVALID_KEY" {
+		t.Errorf("error_code = %q, want S3_INVALID_KEY", code)
+	}
+	// Sanitization: the message must not echo the key.
+	if msg, _ := out["error"].(string); strings.Contains(msg, "workspace-42") {
+		t.Errorf("error message echoes the key: %s", msg)
 	}
 }
 

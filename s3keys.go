@@ -13,6 +13,21 @@ var dangerousExtensions = []string{
 	".jar", ".app", ".dmg", ".pkg", ".deb", ".rpm", ".so", ".dll",
 }
 
+// hasDangerousExtension reports whether name ends with a blocklisted
+// extension, ignoring case and trailing dots (Windows strips them on
+// save, so "evil.exe." lands on disk as "evil.exe"). It is the single
+// implementation of the blocklist-matching rule, shared by key
+// validation and attachment filename checks.
+func hasDangerousExtension(name string) bool {
+	trimmed := strings.TrimRight(strings.ToLower(name), ".")
+	for _, ext := range dangerousExtensions {
+		if strings.HasSuffix(trimmed, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 // invalidKeyError reports why a key was refused, without echoing the key.
 type invalidKeyError struct{ reason string }
 
@@ -45,14 +60,8 @@ func validateInputKey(key string, s3 *S3Config) (string, error) {
 			return "", invalidKey("key must not contain '.', '..' or empty segments")
 		}
 	}
-	lower := strings.ToLower(key)
-	// Trim trailing dots before matching: Windows (and some tools) strip
-	// them on save, so "evil.exe." would land on disk as "evil.exe".
-	trimmed := strings.TrimRight(lower, ".")
-	for _, ext := range dangerousExtensions {
-		if strings.HasSuffix(trimmed, ext) {
-			return "", invalidKey("key extension is refused")
-		}
+	if hasDangerousExtension(key) {
+		return "", invalidKey("key extension is refused")
 	}
 	if !prefixAllowed(key, s3.AllowedKeyPrefixes) {
 		return "", invalidKey("key is outside the configured allowlist")
