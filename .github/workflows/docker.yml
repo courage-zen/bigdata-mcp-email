@@ -2,14 +2,13 @@ name: Build and publish image
 
 # Builds a multi-arch (amd64 + arm64) Linux image and pushes it to ghcr.io.
 # - On push to main: tag as `main` + `<short-sha>` (`latest` tracks the newest v* tag, not main).
-# - On tag v*: tag as the version (e.g. v1.0.0) and `latest`, then attach the
-#   image as .tar.gz files (one per arch) to the GitHub Release.
 # - On PR: build only, no push (validates the Dockerfile still builds).
+# Version tags are handled by release.yml (sole owner of tag releases —
+# binaries, images, and one checksums.txt covering everything).
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -64,45 +63,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  release:
-    # Only on version tags: export the just-pushed image per arch as
-    # image-<arch>.tar.gz and attach them to the GitHub Release.
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: read
-
-    steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Export images per arch
-        id: export
-        run: |
-          tag="${GITHUB_REF_NAME}"   # e.g. v1.0.0
-          ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${tag}"
-          for arch in amd64 arm64; do
-            # Pull the arch-specific manifest digest, tag it with a clear name,
-            # then save so `docker load` preserves the repository:tag label.
-            digest=$(docker buildx imagetools inspect "${ref}" --format "{{range .Manifest.Manifests}}{{if eq .Platform.Architecture \"${arch}\"}}{{.Digest}}{{end}}{{end}}")
-            local_tag="email-mcp:${tag}-${arch}"
-            docker pull "${ref}@${digest}"
-            docker tag "${ref}@${digest}" "${local_tag}"
-            docker save "${local_tag}" | gzip > "email-mcp-image-${tag}-linux-${arch}.tar.gz"
-            echo "asset-${arch}=email-mcp-image-${tag}-linux-${arch}.tar.gz" >> "$GITHUB_OUTPUT"
-          done
-
-      - name: Attach to Release and upload assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ steps.export.outputs.asset-amd64 }}
-            ${{ steps.export.outputs.asset-arm64 }}
-          generate_release_notes: true
