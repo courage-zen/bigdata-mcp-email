@@ -359,6 +359,11 @@ func resolveAttachment(env *ServerEnv, m map[string]any, i int, limitBytes int64
 		}
 		if filename == "" {
 			filename = path.Base(key)
+		} else if hasDangerousExtension(filename) {
+			// The resolved key is already clean (validateInputKey); an
+			// explicitly supplied filename is the only smuggling channel
+			// left — refuse it before spending the Stat+Get round trips.
+			return Attachment{}, fail(errCodeInvalidParamValue, "attachments[%d].filename %q uses a refused extension", i, filename)
 		}
 		content, err = env.Store.Get(key, limitBytes)
 		if err != nil {

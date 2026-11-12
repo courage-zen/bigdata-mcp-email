@@ -55,6 +55,20 @@ type MinioObjectStore struct {
 // bucket-location probe); UsePathStyle forces the bucket addressing mode,
 // defaulting to minio-go's auto inference (path-style for custom
 // endpoints). A malformed endpoint is a startup failure.
+// bucketLookup resolves the client bucket-addressing mode: an explicit
+// S3_USE_PATH_STYLE value forces Path/DNS; unset (or unparseable) leaves
+// minio-go's auto inference (custom endpoint -> path-style, native AWS ->
+// virtual-host).
+func bucketLookup(cfg *S3Config) minio.BucketLookupType {
+	if !cfg.PathStyleExplicit {
+		return minio.BucketLookupAuto
+	}
+	if cfg.UsePathStyle {
+		return minio.BucketLookupPath
+	}
+	return minio.BucketLookupDNS
+}
+
 func NewMinioObjectStore(cfg *S3Config) (*MinioObjectStore, error) {
 	endpoint := cfg.Endpoint
 	secure := cfg.Secure
@@ -80,10 +94,7 @@ func NewMinioObjectStore(cfg *S3Config) (*MinioObjectStore, error) {
 	}).DialContext
 	transport.ResponseHeaderTimeout = s3ReadTimeout
 
-	lookup := minio.BucketLookupAuto
-	if cfg.UsePathStyle {
-		lookup = minio.BucketLookupPath
-	}
+	lookup := bucketLookup(cfg)
 	cli, err := minio.New(endpoint, &minio.Options{
 		Creds:        credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretKey, ""),
 		Secure:       secure,

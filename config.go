@@ -35,6 +35,10 @@ type S3Config struct {
 	Endpoint     string // bare host:port after scheme strip (minio.New wants this)
 	Secure       bool
 	UsePathStyle bool // resolved S3_USE_PATH_STYLE; default inferred (custom endpoint -> true)
+	// PathStyleExplicit records whether S3_USE_PATH_STYLE carried an explicit
+	// value; when false, UsePathStyle is the endpoint-based inference and the
+	// client lookup is left to minio-go's auto mode.
+	PathStyleExplicit bool
 	// AllowedKeyPrefixes is the segment-aware S3_KEY_PREFIXES allowlist;
 	// empty = whole bucket readable.
 	AllowedKeyPrefixes []string
@@ -126,17 +130,18 @@ func parseBoolEnv(name string, def bool) bool {
 	return def
 }
 
-// parsePathStyleEnv maps 1/true/yes -> true and 0/false/no -> false; anything
+// parsePathStyleEnv maps 1/true/yes -> true and 0/false/no -> false (both
+// explicit: carried through to the client as BucketLookupPath/DNS); anything
 // else (including unset) falls back to the inference: custom endpoint ->
-// path style, native AWS -> virtual host.
-func parsePathStyleEnv(raw string, hasEndpoint bool) bool {
+// path style, native AWS -> virtual host (minio-go auto).
+func parsePathStyleEnv(raw string, hasEndpoint bool) (value, explicit bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "1", "true", "yes":
-		return true
+		return true, true
 	case "0", "false", "no":
-		return false
+		return false, true
 	}
-	return hasEndpoint
+	return hasEndpoint, false
 }
 
 // splitCSV splits a comma-separated env var into trimmed, non-empty,
@@ -253,7 +258,7 @@ func LoadConfig(path string) (*Config, error) {
 			s3.Endpoint = v
 			s3.Secure = parseBoolEnv("S3_SECURE", false)
 		}
-		s3.UsePathStyle = parsePathStyleEnv(s3Env("S3_USE_PATH_STYLE", ""), s3.EndpointURL != "" || s3.Endpoint != "")
+		s3.UsePathStyle, s3.PathStyleExplicit = parsePathStyleEnv(s3Env("S3_USE_PATH_STYLE", ""), s3.EndpointURL != "" || s3.Endpoint != "")
 		s3.AllowedKeyPrefixes = splitCSV(s3Env("S3_KEY_PREFIXES", ""))
 		s3.MaxFileBytes = parseBytesEnv(s3Env("S3_MAX_FILE_BYTES", ""), 100*1024*1024)
 	}

@@ -87,10 +87,11 @@ S3 attachments are env-only (the S3 usage standard — no YAML section):
 | `S3_KEY_PREFIXES` | no | comma-separated key-prefix allowlist, segment-boundary match; empty = whole bucket |
 | `S3_MAX_FILE_BYTES` | no | S3 transport read cap in bytes (raw integer, e.g. `104857600`); default 100 MiB |
 
-Missing any required variable disables S3 attachments (`S3_UNAVAILABLE` per
-call, `/health` reports `"not-configured"`); the server still starts — but a
-present-yet-invalid `AWS_ENDPOINT_URL` is a startup error, not a soft disable. The
-legacy names `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_ENDPOINT` +
+Missing any of the three trio variables disables S3 attachments
+(`S3_UNAVAILABLE` per call, `/health` reports `"not-configured"`); the
+server still starts. An endpoint, by contrast, is required in practice (see
+the table row) — and a present-yet-invalid `AWS_ENDPOINT_URL` is a startup
+error, not a soft disable. The legacy names `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_ENDPOINT` +
 `S3_SECURE` remain readable for one version (standard names win); the yaml
 `s3:` section is ignored.
 

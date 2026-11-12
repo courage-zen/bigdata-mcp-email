@@ -27,9 +27,11 @@ func (f *fakeSender) Send(from string, to []string, msg []byte) error {
 type fakeObjectStore struct {
 	objects map[string][]byte
 	err     error // when non-nil, returned for every key
+	gets    int   // number of Get calls (for wasted-download assertions)
 }
 
 func (f *fakeObjectStore) Get(key string, limit int64) ([]byte, error) {
+	f.gets++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -891,6 +893,31 @@ func TestSendEmail_FilenameTrailingDotBypass(t *testing.T) {
 	})
 	if out["success"] != false {
 		t.Fatal("trailing-dot filename must not bypass the blocklist")
+	}
+}
+
+// TestSendEmail_DangerousFilenameEarlyReject pins the wasted-IO guarantee:
+// an s3 attachment whose explicit filename is blocklisted is refused before
+// any download (no Store.Get call). The key itself is validated separately
+// (validateInputKey); this covers the smuggled-filename channel.
+func TestSendEmail_DangerousFilenameEarlyReject(t *testing.T) {
+	env, _ := newToolEnv(t)
+	fs := &fakeObjectStore{objects: map[string][]byte{"report.xlsx": []byte("v")}}
+	env.Store = fs
+	out := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to": "a@x.com", "subject": "s", "body": "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "report.xlsx", "filename": "evil.exe",
+		}},
+	})
+	if out["success"] != false {
+		t.Fatal("blocklisted explicit filename must be refused")
+	}
+	if code, _ := out["error_code"].(string); code != "INVALID_PARAM_VALUE" {
+		t.Errorf("error_code = %q, want INVALID_PARAM_VALUE", code)
+	}
+	if fs.gets != 0 {
+		t.Fatalf("Store.Get called %d times; the blocklist check must precede the fetch", fs.gets)
 	}
 }
 

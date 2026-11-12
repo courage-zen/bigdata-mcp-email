@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+
+	"github.com/minio/minio-go/v7"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -210,5 +212,29 @@ func TestObjectStore_Get_NoSuchBucket(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bucket") {
 		t.Errorf("err should hint at bucket config: %v", err)
+	}
+}
+
+// TestBucketLookupTriState pins the design-doc contract: explicit
+// S3_USE_PATH_STYLE=0/false/no means BucketLookupDNS even when path-style
+// would be inferred; explicit true means BucketLookupPath; unset means Auto
+// (minio-go infers: custom endpoint -> path-style, native -> virtual-host).
+func TestBucketLookupTriState(t *testing.T) {
+	tests := []struct {
+		name              string
+		usePathStyle      bool
+		pathStyleExplicit bool
+		want              minio.BucketLookupType
+	}{
+		{"explicit false forces DNS", false, true, minio.BucketLookupDNS},
+		{"explicit true forces path", true, true, minio.BucketLookupPath},
+		{"unset leaves auto", true, false, minio.BucketLookupAuto},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bucketLookup(&S3Config{UsePathStyle: tt.usePathStyle, PathStyleExplicit: tt.pathStyleExplicit}); got != tt.want {
+				t.Fatalf("bucketLookup = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
