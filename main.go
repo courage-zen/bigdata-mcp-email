@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -30,19 +29,7 @@ func main() {
 
 	env := &ServerEnv{Config: cfg, Sender: &SMTPSender{Host: cfg.SMTP.Host, Port: cfg.SMTP.Port}}
 	if cfg.S3 != nil {
-		// TEMPORARY (Task 3 deletes this): until NewMinioObjectStore is
-		// rewritten to take S3Config, strip AWS_ENDPOINT_URL's scheme here so
-		// the standard config form doesn't die at minio.New("") with a
-		// misleading endpoint error. Legacy S3_ENDPOINT is already bare.
-		endpoint, secure := cfg.S3.Endpoint, cfg.S3.Secure
-		if cfg.S3.EndpointURL != "" {
-			u, err := url.Parse(cfg.S3.EndpointURL)
-			if err != nil {
-				log.Fatalf("s3: invalid AWS_ENDPOINT_URL: %v", err)
-			}
-			endpoint, secure = u.Host, u.Scheme == "https"
-		}
-		store, err := NewMinioObjectStore(endpoint, cfg.S3.AccessKeyID, cfg.S3.SecretKey, cfg.S3.Bucket, secure)
+		store, err := NewMinioObjectStore(cfg.S3)
 		if err != nil {
 			log.Fatalf("s3: %v", err)
 		}

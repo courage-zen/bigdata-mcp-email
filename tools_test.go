@@ -38,7 +38,7 @@ func (f *fakeObjectStore) Get(key string, limit int64) ([]byte, error) {
 		return nil, ErrObjectNotFound
 	}
 	if int64(len(data)) > limit {
-		return nil, ErrObjectTooLarge
+		return nil, ErrAttachmentTooLarge
 	}
 	return data, nil
 }

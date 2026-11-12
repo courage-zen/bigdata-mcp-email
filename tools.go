@@ -358,7 +358,7 @@ func resolveAttachment(env *ServerEnv, m map[string]any, i int, limitBytes int64
 			if errors.Is(err, ErrObjectNotFound) {
 				return Attachment{}, fail(errCodeS3ObjectNotFound, "attachments[%d].s3_key: %v", i, err)
 			}
-			if errors.Is(err, ErrObjectTooLarge) {
+			if errors.Is(err, ErrObjectTooLarge) || errors.Is(err, ErrAttachmentTooLarge) {
 				return Attachment{}, fail(errCodeAttachmentTooLarge, "attachments[%d] (s3_key %q) exceeds the %d MiB limit", i, s3key, env.Config.MaxAttachmentMB)
 			}
 			return Attachment{}, fail(errCodeS3FetchFailed, "attachments[%d].s3_key: %v", i, err)
