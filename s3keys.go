@@ -46,8 +46,11 @@ func validateInputKey(key string, s3 *S3Config) (string, error) {
 		}
 	}
 	lower := strings.ToLower(key)
+	// Trim trailing dots before matching: Windows (and some tools) strip
+	// them on save, so "evil.exe." would land on disk as "evil.exe".
+	trimmed := strings.TrimRight(lower, ".")
 	for _, ext := range dangerousExtensions {
-		if strings.HasSuffix(lower, ext) {
+		if strings.HasSuffix(trimmed, ext) {
 			return "", invalidKey("key extension is refused")
 		}
 	}
@@ -69,12 +72,15 @@ func prefixAllowed(key string, prefixes []string) bool {
 		if key == p {
 			return true
 		}
-		if strings.HasPrefix(key, p) && (strings.HasSuffix(p, "/") || len(key) > len(p) && key[len(p)] == '/') {
+		if strings.HasPrefix(key, p) && (strings.HasSuffix(p, "/") || (len(key) > len(p) && key[len(p)] == '/')) {
 			return true
 		}
 	}
 	return false
 }
+
+// errNoKeyInURL is the shared reason for URLs that carry no object key.
+const errNoKeyInURL = "URL contains no object key; pass s3_key as a plain key or a full object-store URL of an object in the configured bucket"
 
 // resolveInputKey normalizes a tool-supplied s3_key argument: a plain key
 // passes through; a full object-store URL (as pasted from attachment JSON,
@@ -92,7 +98,7 @@ func resolveInputKey(raw string, s3 *S3Config) (string, error) {
 	}
 	host, path, ok := strings.Cut(rest, "/")
 	if !ok {
-		return "", invalidKey("URL contains no object key; pass s3_key as a plain key or a full object-store URL of an object in the configured bucket")
+		return "", invalidKey(errNoKeyInURL)
 	}
 	// Virtual-host style: host is "<bucket>.<domain>".
 	if domain, isVH := strings.CutPrefix(host, s3.Bucket+"."); isVH && domain != "" {
@@ -100,7 +106,7 @@ func resolveInputKey(raw string, s3 *S3Config) (string, error) {
 	}
 	// Path style: the first path segment must be the bucket.
 	if path == s3.Bucket || path == s3.Bucket+"/" {
-		return "", invalidKey("URL contains no object key; pass s3_key as a plain key or a full object-store URL of an object in the configured bucket")
+		return "", invalidKey(errNoKeyInURL)
 	}
 	key, isPS := strings.CutPrefix(path, s3.Bucket+"/")
 	if !isPS {
@@ -109,12 +115,14 @@ func resolveInputKey(raw string, s3 *S3Config) (string, error) {
 	return validateInputKey(key, s3)
 }
 
+// trimScheme reports whether raw starts with an (any-case) http:// or
+// https:// scheme and returns the remainder with its original casing
+// (S3 keys are case-sensitive; hosts are not).
 func trimScheme(raw string) (rest string, isURL bool) {
-	if r, ok := strings.CutPrefix(raw, "http://"); ok {
-		return r, true
-	}
-	if r, ok := strings.CutPrefix(raw, "https://"); ok {
-		return r, true
+	for _, scheme := range [...]string{"http://", "https://"} {
+		if len(raw) >= len(scheme) && strings.EqualFold(raw[:len(scheme)], scheme) {
+			return raw[len(scheme):], true
+		}
 	}
 	return raw, false
 }

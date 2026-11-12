@@ -61,6 +61,22 @@ func TestValidateInputKey_AllowlistSegmentAware(t *testing.T) {
 	}
 }
 
+func TestValidateInputKey_TrailingDotExtensionBypass(t *testing.T) {
+	cfg := keyCfg()
+	// Win32 path.Base keeps trailing dots and the filesystem strips them on
+	// save: "evil.exe." must not slip past the suffix check.
+	for _, key := range []string{"evil.exe.", "payload.EXE.", "evil.exe..."} {
+		if _, err := validateInputKey(key, cfg); err == nil {
+			t.Errorf("key %q must be rejected (trailing-dot bypass)", key)
+		}
+	}
+	for _, key := range []string{"report.v1.2.xlsx", "archive.tar.gz"} {
+		if _, err := validateInputKey(key, cfg); err != nil {
+			t.Errorf("legit dotted key %q rejected: %v", key, err)
+		}
+	}
+}
+
 func TestValidateInputKey_TrailingSlashPrefix(t *testing.T) {
 	cfg := keyCfg("workspaces/")
 	if _, err := validateInputKey("workspaces/a.xlsx", cfg); err != nil {
@@ -76,6 +92,14 @@ func TestResolveInputKey_PlainKeyPasses(t *testing.T) {
 	k, err := resolveInputKey("workspaces/a/b.xlsx", cfg)
 	if err != nil || k != "workspaces/a/b.xlsx" {
 		t.Fatalf("resolve = %q, %v", k, err)
+	}
+	// '?' is a legal S3 key char and must survive in a plain (non-URL) key.
+	if k, err := resolveInputKey("workspaces/a b?q1=v.xlsx", cfg); err != nil || k != "workspaces/a b?q1=v.xlsx" {
+		t.Fatalf("plain key with '?': resolve = %q, %v", k, err)
+	}
+	// Surrounding whitespace is trimmed before validation.
+	if k, err := resolveInputKey("  workspaces/a/b.xlsx  ", cfg); err != nil || k != "workspaces/a/b.xlsx" {
+		t.Fatalf("padded key: resolve = %q, %v", k, err)
 	}
 }
 
@@ -103,6 +127,30 @@ func TestResolveInputKey_VirtualHostURL(t *testing.T) {
 	k, err := resolveInputKey("https://uploads.s3.amazonaws.com/workspaces/a/b.xlsx", cfg)
 	if err != nil || k != "workspaces/a/b.xlsx" {
 		t.Fatalf("resolve = %q, %v", k, err)
+	}
+}
+
+func TestResolveInputKey_CaseInsensitiveScheme(t *testing.T) {
+	cfg := keyCfg()
+	k, err := resolveInputKey("HTTP://minio:9000/uploads/workspaces/a/b.xlsx", cfg)
+	if err != nil || k != "workspaces/a/b.xlsx" {
+		t.Fatalf("resolve = %q, %v", k, err)
+	}
+}
+
+func TestResolveInputKey_VirtualHostWrongBucket(t *testing.T) {
+	cfg := keyCfg()
+	_, err := resolveInputKey("https://otherbucket.s3.amazonaws.com/workspaces/a.xlsx", cfg)
+	if err == nil {
+		t.Fatal("virtual-host wrong bucket must be rejected")
+	}
+	if !IsInvalidKey(err) {
+		t.Errorf("expected an invalid-key error, got %v", err)
+	}
+	// Sanitization: neither bucket name may leak into the message.
+	msg := err.Error()
+	if strings.Contains(msg, "uploads") || strings.Contains(msg, "otherbucket") {
+		t.Errorf("error leaks internals: %s", msg)
 	}
 }
 
