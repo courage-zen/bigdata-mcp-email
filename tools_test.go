@@ -709,6 +709,7 @@ func TestSendEmail_S3Unavailable(t *testing.T) {
 
 func TestSendEmail_S3ObjectNotFound(t *testing.T) {
 	env, _ := newToolEnv(t)
+	env.Config.S3 = &S3Config{Bucket: "multica-artifacts"}
 	env.Store = &fakeObjectStore{} // empty map
 	out := callSendEmail(t, env, http.Header{}, map[string]any{
 		"to":      "a@x.com",
@@ -723,6 +724,11 @@ func TestSendEmail_S3ObjectNotFound(t *testing.T) {
 	}
 	if code, _ := out["error_code"].(string); code != "S3_OBJECT_NOT_FOUND" {
 		t.Errorf("error_code = %q, want S3_OBJECT_NOT_FOUND", code)
+	}
+	// Bucket attribution: the message names the bucket it read, so
+	// "which bucket was this?" triage doesn't need a second service.
+	if msg, _ := out["error"].(string); !strings.Contains(msg, "multica-artifacts") {
+		t.Errorf("error message should name the bucket: %s", msg)
 	}
 	// Sanitization: the message must not echo the requested key.
 	if msg, _ := out["error"].(string); strings.Contains(msg, "missing") {

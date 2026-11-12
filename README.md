@@ -160,7 +160,10 @@ stripped). Keys are validated: no traversal, no dangerous extensions
 Failed calls return `success: false` with an `error` message and a
 machine-readable `error_code` (e.g. `S3_OBJECT_NOT_FOUND`,
 `S3_OBJECT_TOO_LARGE`, `S3_INVALID_KEY`, `ATTACHMENT_TOO_LARGE`,
-`MISSING_FILENAME`, `INVALID_PARAM_TYPE`).
+`MISSING_FILENAME`, `INVALID_PARAM_TYPE`). The `S3_OBJECT_NOT_FOUND`
+message names the bucket it tried to read (e.g. `object not found in
+bucket "multica-artifacts"`) so bucket-attribution issues surface
+directly; the object key itself is never echoed.
 
 Direct HTTP callers (bypassing the proxy) can set `X-Multica-*` headers
 themselves to get task context echoed in `multica_context` for tracing.

@@ -368,6 +368,13 @@ func resolveAttachment(env *ServerEnv, m map[string]any, i int, limitBytes int64
 		content, err = env.Store.Get(key, limitBytes)
 		if err != nil {
 			if errors.Is(err, ErrObjectNotFound) {
+				// Name the bucket so "which bucket was this?" triage
+				// doesn't need a second service to compare reads against
+				// (bucket, unlike key/endpoint, is a safe echo: it's this
+				// server's own config, not caller input).
+				if s3cfg.Bucket != "" {
+					return Attachment{}, fail(errCodeS3ObjectNotFound, "attachments[%d].s3_key: object not found in bucket %q", i, s3cfg.Bucket)
+				}
 				return Attachment{}, fail(errCodeS3ObjectNotFound, "attachments[%d].s3_key: object not found", i)
 			}
 			if errors.Is(err, ErrObjectTooLarge) {

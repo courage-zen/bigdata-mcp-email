@@ -131,13 +131,16 @@ S3 相关 env 变量：
    key）；
 3. filename 缺省 → 归一化后 key 的 basename；
 4. `Store.Get` 错误映射：
-   - `ErrObjectNotFound` → `S3_OBJECT_NOT_FOUND`（消息不含 key）；
+   - `ErrObjectNotFound` → `S3_OBJECT_NOT_FOUND`（消息不含 key，但含
+     桶名——2026-11-12 定向放宽：桶名是本服务自身配置而非调用方输入，
+     回显可让"读的是哪个桶"的排查无需第二个服务读回对比）；
    - `ErrObjectTooLarge` → `S3_OBJECT_TOO_LARGE`（S3 层超限）；
    - `ErrAttachmentTooLarge` → `ATTACHMENT_TOO_LARGE`（附件层超限；
      inline b64 超限仍用此码，语义不变）；
    - 其余 → `S3_FETCH_FAILED`（净化后文本）。
 
-消息净化范围：bucket、endpoint、完整 key 不回显；filename（调用方自
+消息净化范围：endpoint、完整 key 不回显；bucket 仅在
+`S3_OBJECT_NOT_FOUND` 消息中回显（见上）；filename（调用方自
 供或 basename）可回显。
 
 ## Health（server.go）
