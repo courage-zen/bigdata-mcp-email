@@ -191,3 +191,66 @@ as two containers in one pod: email-mcp exposes 8000, the forwarder listens on
 2525 pod-locally and holds the upstream SMTP credentials. The dependency
 between the two is the SMTP protocol itself — point `smtp.host`/`smtp.port`
 at any plaintext submission endpoint.
+
+## Upgrading to v0.3.0 (k8s deployment notes)
+
+The S3 read side was aligned to the cross-service MCP S3 usage standard.
+For a deployment upgrading from v0.2.x, the behavioral deltas that can
+touch your pod spec / rollout:
+
+**1. S3 config moves out of config.yaml — env only.**
+
+v0.2.x: S3 was a `s3:` section in config.yaml (or `S3_ENDPOINT` /
+`S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_BUCKET` / `S3_SECURE` env vars, which
+required a minimal `s3:` section to exist at all).
+
+v0.3.0: the `s3:` yaml section is **ignored** (startup log warning points at
+the replacement). Set the standard env vars on the container instead:
+
+```yaml
+env:
+  - { name: S3_BUCKET,           value: "multica-artifacts" }
+  - { name: AWS_ACCESS_KEY_ID,   value: "..." }        # legacy S3_ACCESS_KEY still read (one version)
+  - { name: AWS_SECRET_ACCESS_KEY, value: "..." }      # legacy S3_SECRET_KEY still read
+  - { name: AWS_ENDPOINT_URL,    value: "http://minio.internal:9000" }  # full URL; replaces S3_ENDPOINT+S3_SECURE
+```
+
+`AWS_ENDPOINT_URL` is a full URL (scheme picks plaintext/TLS), replacing the
+legacy bare-host + `S3_SECURE` pair. An endpoint is required in practice —
+trio-complete without one, the pod exits at startup (`Error` crash loop).
+Optional: `S3_REGION`→`AWS_REGION` (default `us-east-1`),
+`S3_USE_PATH_STYLE`, `S3_KEY_PREFIXES`, `S3_MAX_FILE_BYTES`.
+
+**2. Partial S3 config is now a soft disable, not a startup crash.**
+
+v0.2.x: an incomplete `s3:` yaml section was a config error at startup.
+
+v0.3.0: missing any of the trio (`S3_BUCKET` / `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY`) disables s3_key attachments (per-call
+`S3_UNAVAILABLE`, startup warning naming only the missing variable names),
+and the server starts normally. Watch `/health` — `"s3":"not-configured"`
+means attachments are silently off (v0.2.x `/health` had no s3 field).
+
+**3. S3 oversize error code split.**
+
+v0.2.x: any oversized object → `ATTACHMENT_TOO_LARGE`.
+
+v0.3.0: over the S3 transport cap (`S3_MAX_FILE_BYTES`, default 100 MiB) →
+`S3_OBJECT_TOO_LARGE`; over the attachment cap (`max_attachment_mb`, default
+10 MiB) → `ATTACHMENT_TOO_LARGE`. Update any automation that branches on the
+old code.
+
+**4. `s3_key` accepts URLs and validates keys.**
+
+A pasted full object-store URL (presigned query stripped) now resolves to
+its key; keys are validated (no traversal, dangerous-extension blocklist,
+`S3_KEY_PREFIXES` allowlist) and violations fail fast with
+`S3_INVALID_KEY` before any S3 round trip.
+
+**5. Image tag.**
+
+Bump the deployment's image tag: `v0.3.0` on GHCR, or
+`email-mcp:v0.3.0-<arch>` via `docker load` of the release's
+`email-mcp-image-v0.3.0-linux-<arch>.tar.gz`. Verify after rollout:
+`/health` returns `{"status":"ok","s3":"configured"}` (or
+`"not-configured"` if S3 env is intentionally absent).
