@@ -191,32 +191,6 @@ smtp:
 	}
 }
 
-func TestLoadConfig_S3FromFile(t *testing.T) {
-	path := writeConfig(t, `
-smtp:
-  from: "noreply@example.com"
-s3:
-  endpoint: "minio.internal:9000"
-  access_key: "AK"
-  secret_key: "SK"
-  bucket: "multica-artifacts"
-`)
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := cfg.S3
-	if s == nil {
-		t.Fatal("S3 config not loaded")
-	}
-	if s.Endpoint != "minio.internal:9000" || s.AccessKey != "AK" || s.SecretKey != "SK" || s.Bucket != "multica-artifacts" {
-		t.Fatalf("s3 = %+v", *s)
-	}
-	if s.Secure {
-		t.Error("s3.secure must default to false")
-	}
-}
-
 func TestLoadConfig_S3Absent(t *testing.T) {
 	path := writeConfig(t, `
 smtp:
@@ -231,74 +205,237 @@ smtp:
 	}
 }
 
-func TestLoadConfig_S3EnvOverrides(t *testing.T) {
+func TestLoadConfig_S3EnvTrio(t *testing.T) {
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
-s3:
-  endpoint: "minio.internal:9000"
-  access_key: "AK"
-  secret_key: "SK"
-  bucket: "multica-artifacts"
 `)
-	t.Setenv("S3_ENDPOINT", "10.9.8.7:9000")
+	t.Setenv("S3_BUCKET", "multica-artifacts")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cfg.S3
+	if s == nil {
+		t.Fatal("S3 = nil, want configured from env trio")
+	}
+	if s.Bucket != "multica-artifacts" || s.AccessKeyID != "AK" || s.SecretKey != "SK" {
+		t.Fatalf("s3 = %+v", *s)
+	}
+	if s.Region != "us-east-1" {
+		t.Errorf("Region = %q, want us-east-1 default", s.Region)
+	}
+	if s.UsePathStyle {
+		t.Errorf("UsePathStyle = true, want virtual-host without endpoint")
+	}
+	if s.MaxFileBytes != 100*1024*1024 {
+		t.Errorf("MaxFileBytes = %d, want 100 MiB default", s.MaxFileBytes)
+	}
+	if s.AllowedKeyPrefixes != nil {
+		t.Errorf("AllowedKeyPrefixes = %v, want nil", s.AllowedKeyPrefixes)
+	}
+}
+
+func TestLoadConfig_S3PartialTrioSoftDisable(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	// Two of three: partial config must NOT be a startup error — S3 is off.
+	t.Setenv("S3_BUCKET", "B")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("partial trio must soft-disable, not fail: %v", err)
+	}
+	if cfg.S3 != nil {
+		t.Fatalf("S3 = %+v, want nil (soft disable)", *cfg.S3)
+	}
+}
+
+func TestLoadConfig_S3LegacyNames(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	t.Setenv("S3_BUCKET", "B")
+	t.Setenv("S3_ACCESS_KEY", "AK")
+	t.Setenv("S3_SECRET_KEY", "SK")
+	t.Setenv("S3_ENDPOINT", "minio.internal:9000")
 	t.Setenv("S3_SECURE", "true")
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.S3.Endpoint != "10.9.8.7:9000" || !cfg.S3.Secure {
-		t.Fatalf("env override failed: %+v", *cfg.S3)
+	s := cfg.S3
+	if s == nil {
+		t.Fatal("S3 = nil, want legacy names accepted for one version")
+	}
+	if s.Endpoint != "minio.internal:9000" || !s.Secure {
+		t.Fatalf("legacy endpoint/secure: %+v", *s)
 	}
 }
 
-func TestLoadConfig_S3Incomplete(t *testing.T) {
+func TestLoadConfig_S3StandardNameWins(t *testing.T) {
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
-s3:
-  endpoint: "minio.internal:9000"
 `)
-	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("incomplete s3 section must fail at startup, not at first use")
-	}
-}
-
-func TestLoadConfig_S3EnvCompletesFileSection(t *testing.T) {
-	path := writeConfig(t, `
-smtp:
-  from: "noreply@example.com"
-s3:
-  endpoint: "minio.internal:9000"
-`)
-	t.Setenv("S3_ACCESS_KEY", "AK")
-	t.Setenv("S3_SECRET_KEY", "SK")
 	t.Setenv("S3_BUCKET", "B")
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatalf("env vars should complete a partial file section: %v", err)
-	}
-	if cfg.S3 == nil || cfg.S3.AccessKey != "AK" || cfg.S3.Endpoint != "minio.internal:9000" {
-		t.Fatalf("s3 = %+v", cfg.S3)
-	}
-}
-
-func TestLoadConfig_S3EmptySection(t *testing.T) {
-	path := writeConfig(t, `
-smtp:
-  from: "noreply@example.com"
-s3:
-`)
+	t.Setenv("AWS_ACCESS_KEY_ID", "std-AK")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "std-SK")
+	t.Setenv("S3_ACCESS_KEY", "legacy-AK")
+	t.Setenv("AWS_ENDPOINT_URL", "https://s3.example.com")
+	t.Setenv("S3_ENDPOINT", "legacy:9000")
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.S3 != nil {
-		t.Fatalf("S3 = %+v, want nil for an empty s3: block (the escape hatch the error message recommends)", *cfg.S3)
+	s := cfg.S3
+	if s.AccessKeyID != "std-AK" {
+		t.Errorf("AccessKeyID = %q, want standard name to win", s.AccessKeyID)
+	}
+	if s.EndpointURL != "https://s3.example.com" {
+		t.Errorf("EndpointURL = %q, want standard endpoint name to win", s.EndpointURL)
+	}
+	if s.Endpoint != "" || s.Secure {
+		t.Errorf("legacy endpoint must be inert when standard endpoint set: %+v", *s)
 	}
 }
 
-func TestLoadConfig_S3SecureGarbage(t *testing.T) {
+func TestLoadConfig_S3EndpointURLSchemePicksSecure(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	t.Setenv("S3_BUCKET", "B")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+	t.Setenv("AWS_ENDPOINT_URL", "http://minio.internal:9000")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.S3.EndpointURL != "http://minio.internal:9000" {
+		t.Errorf("EndpointURL = %q", cfg.S3.EndpointURL)
+	}
+}
+
+func TestLoadConfig_S3RegionChain(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	base := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("S3_BUCKET", "B")
+		t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+	}
+	t.Run("S3_REGION wins", func(t *testing.T) {
+		base(t)
+		t.Setenv("S3_REGION", "cn-north-1")
+		t.Setenv("AWS_REGION", "us-west-2")
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.S3.Region != "cn-north-1" {
+			t.Errorf("Region = %q", cfg.S3.Region)
+		}
+	})
+	t.Run("AWS_REGION fallback", func(t *testing.T) {
+		base(t)
+		t.Setenv("AWS_REGION", "us-west-2")
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.S3.Region != "us-west-2" {
+			t.Errorf("Region = %q", cfg.S3.Region)
+		}
+	})
+}
+
+func TestLoadConfig_S3UsePathStyle(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	tests := []struct {
+		name, env, endpoint string
+		want                bool
+	}{
+		{"explicit true no endpoint", "1", "", true},
+		{"explicit true", "yes", "http://m:9000", true},
+		{"explicit false overrides endpoint", "false", "http://m:9000", false},
+		{"inferred from endpoint", "", "http://m:9000", true},
+		{"inferred virtual-host", "", "", false},
+		{"garbage falls back to inference", "maybe", "http://m:9000", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("S3_BUCKET", "B")
+			t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+			t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+			if tt.env != "" {
+				t.Setenv("S3_USE_PATH_STYLE", tt.env)
+			}
+			if tt.endpoint != "" {
+				t.Setenv("AWS_ENDPOINT_URL", tt.endpoint)
+			}
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.S3.UsePathStyle != tt.want {
+				t.Fatalf("UsePathStyle = %v, want %v", cfg.S3.UsePathStyle, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_S3KeyPrefixes(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	t.Setenv("S3_BUCKET", "B")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+	t.Setenv("S3_KEY_PREFIXES", " workspaces/ws-1 , reports/ ,, workspaces/ws-1 ")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"workspaces/ws-1", "reports/"}
+	got := cfg.S3.AllowedKeyPrefixes
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("AllowedKeyPrefixes = %v, want %v", got, want)
+	}
+}
+
+func TestLoadConfig_S3MaxFileBytes(t *testing.T) {
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	t.Setenv("S3_BUCKET", "B")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+	t.Setenv("S3_MAX_FILE_BYTES", "4096")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.S3.MaxFileBytes != 4096 {
+		t.Errorf("MaxFileBytes = %d, want 4096", cfg.S3.MaxFileBytes)
+	}
+}
+
+func TestLoadConfig_YamlS3SectionIgnored(t *testing.T) {
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
@@ -308,8 +445,12 @@ s3:
   secret_key: "SK"
   bucket: "multica-artifacts"
 `)
-	t.Setenv("S3_SECURE", "yes")
-	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("S3_SECURE=yes must fail: strconv.ParseBool accepts 1/t/true/0/f/false, not yes/no")
+	// No env trio: the yaml section alone must not configure S3.
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.S3 != nil {
+		t.Fatalf("S3 = %+v, want nil (yaml s3: is a deprecated no-op)", *cfg.S3)
 	}
 }

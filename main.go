@@ -29,7 +29,10 @@ func main() {
 
 	env := &ServerEnv{Config: cfg, Sender: &SMTPSender{Host: cfg.SMTP.Host, Port: cfg.SMTP.Port}}
 	if cfg.S3 != nil {
-		store, err := NewMinioObjectStore(cfg.S3.Endpoint, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.Bucket, cfg.S3.Secure)
+		// Interim wiring: the endpoint-URL -> bare host:port scheme strip and
+		// the region/path-style plumbing land with the s3.go rebuild; the
+		// legacy bare-endpoint form still works unchanged.
+		store, err := NewMinioObjectStore(cfg.S3.Endpoint, cfg.S3.AccessKeyID, cfg.S3.SecretKey, cfg.S3.Bucket, cfg.S3.Secure)
 		if err != nil {
 			log.Fatalf("s3: %v", err)
 		}

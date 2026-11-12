@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -22,14 +23,25 @@ func (s SMTPConfig) Addr() string {
 	return net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 }
 
-// S3Config points at the object storage holding agent-produced files
-// (excel-mcp outputs, comment attachments). nil = feature off.
+// S3Config is the standard-mandated env contract. nil = S3 attachments
+// disabled (any of the three required vars missing — a soft failure; the
+// tri-state "configured but incomplete" does not exist).
 type S3Config struct {
-	Endpoint  string
-	AccessKey string
-	SecretKey string
-	Bucket    string
-	Secure    bool
+	Bucket       string
+	Region       string
+	AccessKeyID  string
+	SecretKey    string
+	EndpointURL  string // full URL with scheme (AWS_ENDPOINT_URL) or "" = native AWS
+	Endpoint     string // bare host:port after scheme strip (minio.New wants this)
+	Secure       bool
+	UsePathStyle bool // resolved S3_USE_PATH_STYLE; default inferred (custom endpoint -> true)
+	// AllowedKeyPrefixes is the segment-aware S3_KEY_PREFIXES allowlist;
+	// empty = whole bucket readable.
+	AllowedKeyPrefixes []string
+	// MaxFileBytes is the S3 transport-layer read cap (S3_MAX_FILE_BYTES,
+	// default 100 MiB). The SMTP-attachment cap (MaxAttachmentMB) is a
+	// separate, email-specific limit.
+	MaxFileBytes int64
 }
 
 type fileConfig struct {
@@ -40,7 +52,9 @@ type fileConfig struct {
 	} `yaml:"smtp"`
 	MaxAttachmentMB int      `yaml:"max_attachment_mb"`
 	AllowedDomains  []string `yaml:"allowed_domains"`
-	S3              struct {
+	// S3 exists only to detect a s3: section for the deprecation warning;
+	// its values are discarded (env is the sole S3 config source).
+	S3 struct {
 		Endpoint  string `yaml:"endpoint"`
 		AccessKey string `yaml:"access_key"`
 		SecretKey string `yaml:"secret_key"`
@@ -78,12 +92,79 @@ func normalizeDomains(in []string) []string {
 	return out
 }
 
+// s3Env returns the effective value for an S3 variable: the standard name
+// first, then the legacy name (readable for one version cycle, standard wins).
+func s3Env(std, legacy string) string {
+	if v := os.Getenv(std); v != "" {
+		return v
+	}
+	return os.Getenv(legacy)
+}
+
+// parseBytesEnv parses a byte-count env var; empty or unparseable falls back
+// to def (excel-mcp parse_bytes semantics).
+func parseBytesEnv(raw string, def int64) int64 {
+	if n, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && n > 0 {
+		return n
+	}
+	return def
+}
+
+// parseBoolEnv parses a boolean env var, falling back to def when unset or
+// unparseable (a bad value logs loudly rather than silently flipping the
+// trust model).
+func parseBoolEnv(name string, def bool) bool {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+		// A bad value at this point means a misconfigured deployment; treat
+		// it as fatal via panic is overkill — fall back to default but log.
+		log.Printf("config: %s=%q is not a valid bool, using %v", name, v, def)
+	}
+	return def
+}
+
+// parsePathStyleEnv maps 1/true/yes -> true, 0/false/no -> false; anything
+// else (including unset) falls back to the inference: custom endpoint ->
+// path style, native AWS -> virtual host.
+func parsePathStyleEnv(raw string, hasEndpoint bool) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes":
+		return true
+	case "0", "false", "no":
+		return false
+	}
+	return hasEndpoint
+}
+
+// splitCSV splits a comma-separated env var into trimmed, non-empty,
+// deduplicated parts (first-seen order, like normalizeDomains).
+func splitCSV(raw string) []string {
+	var out []string
+	seen := make(map[string]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
 // LoadConfig reads a YAML config file, applies defaults, then env overrides:
-// SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB / ALLOWED_DOMAINS,
-// plus S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET / S3_SECURE
-// (S3 vars apply only when the s3: section is present — the section gates
-// the feature). An empty path means "config.yaml in the current directory"
-// (missing file is not an error when env vars provide everything).
+// SMTP_HOST / SMTP_PORT / SMTP_FROM / MAX_ATTACHMENT_MB / ALLOWED_DOMAINS.
+// S3 is env-only per the S3 usage standard (S3_BUCKET / AWS_ACCESS_KEY_ID /
+// AWS_SECRET_ACCESS_KEY + optional AWS_ENDPOINT_URL, S3_REGION, S3_USE_PATH_STYLE,
+// S3_KEY_PREFIXES, S3_MAX_FILE_BYTES; legacy S3_* names readable for one
+// version). A YAML s3: section is a deprecated no-op. An empty path means
+// "config.yaml in the current directory" (missing file is not an error when
+// env vars provide everything).
 func LoadConfig(path string) (*Config, error) {
 	if path == "" {
 		path = "config.yaml"
@@ -117,17 +198,61 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.MaxAttachmentMB = 10
 	}
 
-	// S3: an absent section disables the s3_key attachment source; a present
-	// but incomplete one fails fast at startup (smtp.from style).
-	s3Present := fc.S3.Endpoint != "" || fc.S3.AccessKey != "" || fc.S3.SecretKey != "" || fc.S3.Bucket != ""
-	if s3Present {
-		cfg.S3 = &S3Config{
-			Endpoint:  fc.S3.Endpoint,
-			AccessKey: fc.S3.AccessKey,
-			SecretKey: fc.S3.SecretKey,
-			Bucket:    fc.S3.Bucket,
-			Secure:    fc.S3.Secure,
+	// S3: env-only contract (the S3 usage standard). A YAML s3: section is a
+	// deprecated no-op: warn so operators notice, then ignore its values.
+	if fc.S3.Endpoint != "" || fc.S3.AccessKey != "" || fc.S3.SecretKey != "" || fc.S3.Bucket != "" || fc.S3.Secure {
+		log.Printf("config: the yaml s3: section is deprecated and ignored; set S3_BUCKET / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (+ AWS_ENDPOINT_URL, S3_REGION, S3_USE_PATH_STYLE, S3_KEY_PREFIXES, S3_MAX_FILE_BYTES) instead")
+	}
+
+	// Required trio: bucket + static credentials. Any one missing = S3 off
+	// (soft disable; the caller gets S3_UNAVAILABLE per call).
+	bucket := strings.TrimSpace(s3Env("S3_BUCKET", "S3_BUCKET"))
+	accessKeyID := strings.TrimSpace(s3Env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY"))
+	secretKey := strings.TrimSpace(s3Env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_KEY"))
+	partial := bucket != "" || accessKeyID != "" || secretKey != ""
+	if bucket == "" || accessKeyID == "" || secretKey == "" {
+		if partial {
+			// Name only the missing vars, never their values.
+			missing := []string{}
+			if bucket == "" {
+				missing = append(missing, "S3_BUCKET")
+			}
+			if accessKeyID == "" {
+				missing = append(missing, "AWS_ACCESS_KEY_ID")
+			}
+			if secretKey == "" {
+				missing = append(missing, "AWS_SECRET_ACCESS_KEY")
+			}
+			log.Printf("config: s3 disabled, missing env: %s (s3_key attachments return S3_UNAVAILABLE)", strings.Join(missing, ", "))
 		}
+	} else {
+		cfg.S3 = &S3Config{
+			Bucket:      bucket,
+			AccessKeyID: accessKeyID,
+			SecretKey:   secretKey,
+		}
+	}
+	if cfg.S3 != nil {
+		s3 := cfg.S3
+		// Region fallback chain: S3_REGION -> AWS_REGION -> us-east-1.
+		s3.Region = strings.TrimSpace(s3Env("S3_REGION", ""))
+		if s3.Region == "" {
+			s3.Region = strings.TrimSpace(os.Getenv("AWS_REGION"))
+		}
+		if s3.Region == "" {
+			s3.Region = "us-east-1"
+		}
+		// Endpoint: standard form is a full URL whose scheme picks Secure;
+		// the legacy pair is a bare host:port + S3_SECURE (default false).
+		if v := s3Env("AWS_ENDPOINT_URL", ""); v != "" {
+			s3.EndpointURL = v
+		} else if v := os.Getenv("S3_ENDPOINT"); v != "" {
+			s3.Endpoint = v
+			s3.Secure = parseBoolEnv("S3_SECURE", false)
+		}
+		s3.UsePathStyle = parsePathStyleEnv(s3Env("S3_USE_PATH_STYLE", ""), s3.EndpointURL != "" || s3.Endpoint != "")
+		s3.AllowedKeyPrefixes = splitCSV(s3Env("S3_KEY_PREFIXES", ""))
+		s3.MaxFileBytes = parseBytesEnv(s3Env("S3_MAX_FILE_BYTES", ""), 100*1024*1024)
 	}
 
 	// Env overrides.
@@ -151,27 +276,6 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		cfg.MaxAttachmentMB = n
 	}
-	if cfg.S3 != nil {
-		if v := os.Getenv("S3_ENDPOINT"); v != "" {
-			cfg.S3.Endpoint = v
-		}
-		if v := os.Getenv("S3_ACCESS_KEY"); v != "" {
-			cfg.S3.AccessKey = v
-		}
-		if v := os.Getenv("S3_SECRET_KEY"); v != "" {
-			cfg.S3.SecretKey = v
-		}
-		if v := os.Getenv("S3_BUCKET"); v != "" {
-			cfg.S3.Bucket = v
-		}
-		if v := os.Getenv("S3_SECURE"); v != "" {
-			b, err := strconv.ParseBool(v)
-			if err != nil {
-				return nil, fmt.Errorf("S3_SECURE: %w", err)
-			}
-			cfg.S3.Secure = b
-		}
-	}
 
 	// Allowlist normalization: env replaces the file list entirely.
 	if v := os.Getenv("ALLOWED_DOMAINS"); v != "" {
@@ -191,25 +295,6 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.MaxAttachmentMB < 1 {
 		return nil, fmt.Errorf("max_attachment_mb (or MAX_ATTACHMENT_MB) must be >= 1 MiB, got %d", cfg.MaxAttachmentMB)
-	}
-	if cfg.S3 != nil {
-		missing := []string{}
-		if cfg.S3.Endpoint == "" {
-			missing = append(missing, "endpoint")
-		}
-		if cfg.S3.AccessKey == "" {
-			missing = append(missing, "access_key")
-		}
-		if cfg.S3.SecretKey == "" {
-			missing = append(missing, "secret_key")
-		}
-		if cfg.S3.Bucket == "" {
-			missing = append(missing, "bucket")
-		}
-		if len(missing) > 0 {
-			return nil, fmt.Errorf("s3 section is present but incomplete: missing %s (unset fields disable s3_key attachments: leave the whole s3: section empty)",
-				strings.Join(missing, ", "))
-		}
 	}
 	return cfg, nil
 }
