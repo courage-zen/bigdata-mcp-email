@@ -42,14 +42,14 @@ docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=noreply@example.co
 Or pull the image from GHCR:
 
 ```sh
-docker pull ghcr.io/courage-zen/bigdata-mcp-email:v0.2.1
+docker pull ghcr.io/courage-zen/bigdata-mcp-email:v0.3.0
 ```
 
 Or download a per-arch image tar.gz from [Releases](https://github.com/courage-zen/bigdata-mcp-email/releases) and load it — no registry access needed (air-gapped path):
 
 ```sh
-docker load -i email-mcp-image-v0.2.1-linux-arm64.tar.gz
-docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=you@example.com email-mcp:v0.2.1-arm64
+docker load -i email-mcp-image-v0.3.0-linux-arm64.tar.gz
+docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=you@example.com email-mcp:v0.3.0-arm64
 ```
 
 ## Configure
@@ -65,24 +65,39 @@ max_attachment_mb: 10   # optional
 allowed_domains:        # optional; omit = no restriction
   - "example.com"
   - "acme.org"
-s3:                    # optional; omit = s3_key attachments disabled
-  endpoint: "minio.internal:9000"
-  access_key: "..."
-  secret_key: "..."
-  bucket: "multica-artifacts"
-  secure: false
 ```
 
 Environment variables override the file: `SMTP_HOST` `SMTP_PORT` `SMTP_FROM`
 `MAX_ATTACHMENT_MB`, and `ALLOWED_DOMAINS` (comma-separated) overrides the
-`allowed_domains` file list. `S3_ENDPOINT` `S3_ACCESS_KEY` `S3_SECRET_KEY`
-`S3_BUCKET` `S3_SECURE` override the file's `s3` section, but only when that
-section is present — a minimal `s3:` section (at least one of the four
-required fields) must exist for them to take effect. Server env:
-`MCP_AUTH_KEY` (comma-separated bearer keys;
-unset = no auth), `MCP_HOST` (default 0.0.0.0), `MCP_PORT` (default 8000).
+`allowed_domains` file list. Server env: `MCP_AUTH_KEY` (comma-separated bearer
+keys; unset = no auth), `MCP_HOST` (default 0.0.0.0), `MCP_PORT` (default 8000).
 `/health` is exempt from auth. `smtp.from` (or `SMTP_FROM`) is required — the
 server exits at startup without it.
+
+S3 attachments are env-only (the S3 usage standard — no YAML section):
+
+| variable | required | meaning |
+|----------|----------|---------|
+| `S3_BUCKET` | yes | bucket holding agent-produced files |
+| `AWS_ACCESS_KEY_ID` | yes | static access key |
+| `AWS_SECRET_ACCESS_KEY` | yes | static secret |
+| `S3_REGION` → `AWS_REGION` | no | region; default `us-east-1` |
+| `AWS_ENDPOINT_URL` | no | S3-compatible endpoint (MinIO/R2), full URL; `http://` = plaintext. Empty = native AWS S3 |
+| `S3_USE_PATH_STYLE` | no | `1/true/yes` or `0/false/no`; unset = path-style when `AWS_ENDPOINT_URL` is set, virtual-host otherwise |
+| `S3_KEY_PREFIXES` | no | comma-separated key-prefix allowlist, segment-boundary match; empty = whole bucket |
+| `S3_MAX_FILE_BYTES` | no | S3 transport read cap, default 100 MiB |
+
+Missing any required variable disables S3 attachments (`S3_UNAVAILABLE` per
+call, `/health` reports `"not-configured"`); the server still starts. The
+legacy names `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_ENDPOINT` +
+`S3_SECURE` remain readable for one version (standard names win); the yaml
+`s3:` section is ignored.
+
+v0.3.0 changes: the yaml `s3:` section is removed (ignored, startup warning),
+S3-layer oversize is renamed from `ATTACHMENT_TOO_LARGE` to
+`S3_OBJECT_TOO_LARGE`, and a partially-configured S3 is a soft disable
+(`/health` `"not-configured"`, `S3_UNAVAILABLE` per call) instead of a
+startup error.
 
 When `allowed_domains` (or `ALLOWED_DOMAINS`) lists at least one domain, every
 recipient address — `to`, `cc`, and the fallback multica user email — must be
@@ -128,14 +143,22 @@ Two mutually exclusive sources per attachment:
 
 - `{"filename": "x.xlsx", "content_b64": "..."}` — inline base64; `filename` is required.
 - `{"s3_key": "workspace-42/reports/x.xlsx"}` — object key in the configured
-  bucket; `filename` defaults to the key's base name. Requires the `s3` config
-  section (see Configure); without it, `s3_key` attachments fail with
+  bucket; `filename` defaults to the key's base name. Requires the S3 env
+  config (see Configure); without it, `s3_key` attachments fail with
   `S3_UNAVAILABLE`.
 
 Size limit per attachment is `max_attachment_mb` (default 10) for both shapes.
+Two size caps apply to `s3_key` attachments: `S3_MAX_FILE_BYTES` (S3 layer,
+default 100 MiB, error `S3_OBJECT_TOO_LARGE`) and `max_attachment_mb`
+(attachment layer, default 10 MiB, error `ATTACHMENT_TOO_LARGE`). `s3_key`
+accepts a plain key or a full object-store URL (presigned query strings are
+stripped). Keys are validated: no traversal, no dangerous extensions
+(`.exe` etc.), and `S3_KEY_PREFIXES` allowlist when set (violation:
+`S3_INVALID_KEY`).
 Failed calls return `success: false` with an `error` message and a
 machine-readable `error_code` (e.g. `S3_OBJECT_NOT_FOUND`,
-`ATTACHMENT_TOO_LARGE`, `MISSING_FILENAME`, `INVALID_PARAM_TYPE`).
+`S3_OBJECT_TOO_LARGE`, `S3_INVALID_KEY`, `ATTACHMENT_TOO_LARGE`,
+`MISSING_FILENAME`, `INVALID_PARAM_TYPE`).
 
 Direct HTTP callers (bypassing the proxy) can set `X-Multica-*` headers
 themselves to get task context echoed in `multica_context` for tracing.
