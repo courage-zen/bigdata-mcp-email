@@ -101,8 +101,8 @@ func s3Env(std, legacy string) string {
 	return os.Getenv(legacy)
 }
 
-// parseBytesEnv parses a byte-count env var; empty or unparseable falls back
-// to def (excel-mcp parse_bytes semantics).
+// parseBytesEnv parses a byte-count env var; empty, unparseable, or
+// non-positive falls back to def (excel-mcp parse_bytes semantics).
 func parseBytesEnv(raw string, def int64) int64 {
 	if n, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && n > 0 {
 		return n
@@ -110,9 +110,10 @@ func parseBytesEnv(raw string, def int64) int64 {
 	return def
 }
 
-// parseBoolEnv parses a boolean env var, falling back to def when unset or
-// unparseable (a bad value logs loudly rather than silently flipping the
-// trust model).
+// parseBoolEnv parses a boolean env var with strconv.ParseBool's vocabulary
+// (1/t/true/0/f/false); unset or unparseable values log and fall back to
+// def (a bad value warns loudly instead of silently flipping the trust
+// model).
 func parseBoolEnv(name string, def bool) bool {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
@@ -125,7 +126,7 @@ func parseBoolEnv(name string, def bool) bool {
 	return def
 }
 
-// parsePathStyleEnv maps 1/true/yes -> true, 0/false/no -> false; anything
+// parsePathStyleEnv maps 1/true/yes -> true and 0/false/no -> false; anything
 // else (including unset) falls back to the inference: custom endpoint ->
 // path style, native AWS -> virtual host.
 func parsePathStyleEnv(raw string, hasEndpoint bool) bool {
@@ -206,7 +207,7 @@ func LoadConfig(path string) (*Config, error) {
 
 	// Required trio: bucket + static credentials. Any one missing = S3 off
 	// (soft disable; the caller gets S3_UNAVAILABLE per call).
-	bucket := strings.TrimSpace(s3Env("S3_BUCKET", "S3_BUCKET"))
+	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET")) // no legacy name: S3_BUCKET was already standard
 	accessKeyID := strings.TrimSpace(s3Env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY"))
 	secretKey := strings.TrimSpace(s3Env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_KEY"))
 	partial := bucket != "" || accessKeyID != "" || secretKey != ""
@@ -244,9 +245,11 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		// Endpoint: standard form is a full URL whose scheme picks Secure;
 		// the legacy pair is a bare host:port + S3_SECURE (default false).
-		if v := s3Env("AWS_ENDPOINT_URL", ""); v != "" {
+		// Values are trimmed here — minio.New errors confusingly on
+		// whitespace-padded hosts.
+		if v := strings.TrimSpace(s3Env("AWS_ENDPOINT_URL", "")); v != "" {
 			s3.EndpointURL = v
-		} else if v := os.Getenv("S3_ENDPOINT"); v != "" {
+		} else if v := strings.TrimSpace(os.Getenv("S3_ENDPOINT")); v != "" {
 			s3.Endpoint = v
 			s3.Secure = parseBoolEnv("S3_SECURE", false)
 		}

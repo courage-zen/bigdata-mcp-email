@@ -16,6 +16,26 @@ func writeConfig(t *testing.T, content string) string {
 	return path
 }
 
+// unsetS3Env blanks every S3-family env var the contract reads so ambient
+// developer/deployment env can't leak into a test. Empty string is
+// equivalent to unset for every consumer in config.go (s3Env's fallback and
+// the `!= ""` / TrimSpace chains all treat "" as unset).
+func unsetS3Env(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"S3_BUCKET",
+		"AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY",
+		"AWS_SECRET_ACCESS_KEY", "S3_SECRET_KEY",
+		"AWS_ENDPOINT_URL", "S3_ENDPOINT", "S3_SECURE",
+		"S3_REGION", "AWS_REGION",
+		"S3_USE_PATH_STYLE",
+		"S3_KEY_PREFIXES",
+		"S3_MAX_FILE_BYTES",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
 func TestLoadConfig_FromFile(t *testing.T) {
 	path := writeConfig(t, `
 smtp:
@@ -192,6 +212,7 @@ smtp:
 }
 
 func TestLoadConfig_S3Absent(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
@@ -206,6 +227,7 @@ smtp:
 }
 
 func TestLoadConfig_S3EnvTrio(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
@@ -239,6 +261,7 @@ smtp:
 }
 
 func TestLoadConfig_S3PartialTrioSoftDisable(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
@@ -256,6 +279,7 @@ smtp:
 }
 
 func TestLoadConfig_S3LegacyNames(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
@@ -279,33 +303,52 @@ smtp:
 }
 
 func TestLoadConfig_S3StandardNameWins(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
 `)
-	t.Setenv("S3_BUCKET", "B")
-	t.Setenv("AWS_ACCESS_KEY_ID", "std-AK")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "std-SK")
-	t.Setenv("S3_ACCESS_KEY", "legacy-AK")
-	t.Setenv("AWS_ENDPOINT_URL", "https://s3.example.com")
-	t.Setenv("S3_ENDPOINT", "legacy:9000")
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := cfg.S3
-	if s.AccessKeyID != "std-AK" {
-		t.Errorf("AccessKeyID = %q, want standard name to win", s.AccessKeyID)
-	}
-	if s.EndpointURL != "https://s3.example.com" {
-		t.Errorf("EndpointURL = %q, want standard endpoint name to win", s.EndpointURL)
-	}
-	if s.Endpoint != "" || s.Secure {
-		t.Errorf("legacy endpoint must be inert when standard endpoint set: %+v", *s)
-	}
+	t.Run("standard beats legacy", func(t *testing.T) {
+		t.Setenv("S3_BUCKET", "B")
+		t.Setenv("AWS_ACCESS_KEY_ID", "std-AK")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "std-SK")
+		t.Setenv("S3_ACCESS_KEY", "legacy-AK")
+		t.Setenv("AWS_ENDPOINT_URL", "https://s3.example.com")
+		t.Setenv("S3_ENDPOINT", "legacy:9000")
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := cfg.S3
+		if s.AccessKeyID != "std-AK" {
+			t.Errorf("AccessKeyID = %q, want standard name to win", s.AccessKeyID)
+		}
+		if s.EndpointURL != "https://s3.example.com" {
+			t.Errorf("EndpointURL = %q, want standard endpoint name to win", s.EndpointURL)
+		}
+		if s.Endpoint != "" || s.Secure {
+			t.Errorf("legacy endpoint must be inert when standard endpoint set: %+v", *s)
+		}
+	})
+	// s3Env falls back only on an empty standard value, not on mere presence:
+	// AWS_ACCESS_KEY_ID="" must let S3_ACCESS_KEY through.
+	t.Run("empty standard falls back to legacy", func(t *testing.T) {
+		t.Setenv("S3_BUCKET", "B")
+		t.Setenv("AWS_ACCESS_KEY_ID", "")
+		t.Setenv("S3_ACCESS_KEY", "legacy-AK")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.S3.AccessKeyID != "legacy-AK" {
+			t.Errorf("AccessKeyID = %q, want legacy name to win when standard is empty", cfg.S3.AccessKeyID)
+		}
+	})
 }
 
-func TestLoadConfig_S3EndpointURLSchemePicksSecure(t *testing.T) {
+func TestLoadConfig_S3EndpointURLStored(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
@@ -318,12 +361,15 @@ smtp:
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The URL is stored verbatim; deriving Secure from the scheme lands with
+	// the s3.go rebuild (Task 3), where the scheme split happens.
 	if cfg.S3.EndpointURL != "http://minio.internal:9000" {
 		t.Errorf("EndpointURL = %q", cfg.S3.EndpointURL)
 	}
 }
 
 func TestLoadConfig_S3RegionChain(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
@@ -377,6 +423,7 @@ smtp:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			unsetS3Env(t)
 			t.Setenv("S3_BUCKET", "B")
 			t.Setenv("AWS_ACCESS_KEY_ID", "AK")
 			t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
@@ -398,6 +445,7 @@ smtp:
 }
 
 func TestLoadConfig_S3KeyPrefixes(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
@@ -418,24 +466,72 @@ smtp:
 }
 
 func TestLoadConfig_S3MaxFileBytes(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
 `)
+	base := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("S3_BUCKET", "B")
+		t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+	}
+	t.Run("valid", func(t *testing.T) {
+		base(t)
+		t.Setenv("S3_MAX_FILE_BYTES", "4096")
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.S3.MaxFileBytes != 4096 {
+			t.Errorf("MaxFileBytes = %d, want 4096", cfg.S3.MaxFileBytes)
+		}
+	})
+	// Zero, negative, and unparseable all fall back to the 100 MiB default
+	// (the n > 0 guard in parseBytesEnv — 0 would otherwise disable the cap).
+	for _, raw := range []string{"0", "-1", "abc"} {
+		t.Run("fallback_"+raw, func(t *testing.T) {
+			base(t)
+			t.Setenv("S3_MAX_FILE_BYTES", raw)
+			cfg, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.S3.MaxFileBytes != 100*1024*1024 {
+				t.Errorf("S3_MAX_FILE_BYTES=%q: MaxFileBytes = %d, want 100 MiB default", raw, cfg.S3.MaxFileBytes)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_S3SecureGarbageFallsBack(t *testing.T) {
+	unsetS3Env(t)
+	path := writeConfig(t, `
+smtp:
+  from: "noreply@example.com"
+`)
+	// S3_SECURE=maybe is unparseable by strconv.ParseBool: the new contract
+	// logs and falls back to the default rather than failing startup.
 	t.Setenv("S3_BUCKET", "B")
 	t.Setenv("AWS_ACCESS_KEY_ID", "AK")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
-	t.Setenv("S3_MAX_FILE_BYTES", "4096")
+	t.Setenv("S3_ENDPOINT", "minio.internal:9000")
+	t.Setenv("S3_SECURE", "maybe")
 	cfg, err := LoadConfig(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("S3_SECURE=maybe must log and fall back, not fail: %v", err)
 	}
-	if cfg.S3.MaxFileBytes != 4096 {
-		t.Errorf("MaxFileBytes = %d, want 4096", cfg.S3.MaxFileBytes)
+	if cfg.S3 == nil {
+		t.Fatal("S3 = nil, want configured from env trio")
+	}
+	if cfg.S3.Secure {
+		t.Error("Secure = true, want false (default) for unparseable S3_SECURE")
 	}
 }
 
 func TestLoadConfig_YamlS3SectionIgnored(t *testing.T) {
+	unsetS3Env(t)
 	path := writeConfig(t, `
 smtp:
   from: "noreply@example.com"
