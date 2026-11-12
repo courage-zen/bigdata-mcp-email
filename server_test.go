@@ -134,8 +134,26 @@ func TestServer_HealthEndpoint(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 || !strings.Contains(string(b), "ok") {
+	if resp.StatusCode != 200 || !strings.Contains(string(b), `"s3":"not-configured"`) {
 		t.Fatalf("health = %d %s", resp.StatusCode, b)
+	}
+
+	// With a store configured (any ObjectStore), health flips to configured.
+	env := &ServerEnv{
+		Config: &Config{SMTP: SMTPConfig{Host: "h", Port: 1, From: "noreply@example.com"}, MaxAttachmentMB: 10},
+		Sender: fs,
+		Store:  &fakeObjectStore{},
+	}
+	ts2 := httptest.NewServer(NewHandler(env, ""))
+	defer ts2.Close()
+	resp2, err := http.Get(ts2.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	b2, _ := io.ReadAll(resp2.Body)
+	if resp2.StatusCode != 200 || !strings.Contains(string(b2), `"s3":"configured"`) {
+		t.Fatalf("health with store = %d %s", resp2.StatusCode, b2)
 	}
 }
 

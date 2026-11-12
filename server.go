@@ -14,14 +14,18 @@ import (
 func NewHandler(env *ServerEnv, authKeys string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		s3State := "not-configured"
+		if env.Store != nil {
+			s3State = "configured"
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","s3":"` + s3State + `"}`))
 	})
 
-	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.2.1"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "email-mcp", Version: "v0.3.0"}, nil)
 	tool := &mcp.Tool{
 		Name: "send-email",
-		Description: fmt.Sprintf("Send an email via the configured SMTP relay (subject and body required; body is plain text or HTML per body_type, default \"text\"). Attachments (max %d MiB each) come in two mutually exclusive shapes: inline base64 ({\"filename\": \"x.xlsx\", \"content_b64\": \"...\"} — filename required) or an object-store reference ({\"s3_key\": \"workspace-42/reports/x.xlsx\"} — filename defaults to the key's base name; requires the s3 config section). If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails. Failed calls return success:false with a human-readable \"error\" and a machine-readable \"error_code\".",
+		Description: fmt.Sprintf("Send an email via the configured SMTP relay (subject and body required; body is plain text or HTML per body_type, default \"text\"). Attachments (max %d MiB each) come in two mutually exclusive shapes: inline base64 ({\"filename\": \"x.xlsx\", \"content_b64\": \"...\"} — filename required) or an object-store reference ({\"s3_key\": \"workspace-42/reports/x.xlsx\"} — a plain key or a full object-store URL; filename defaults to the key's base name; requires S3 env config). If \"to\" is empty, the multica caller's user email is used; if that is also absent the call fails. Failed calls return success:false with a human-readable \"error\" and a machine-readable \"error_code\".",
 			env.Config.MaxAttachmentMB),
 		InputSchema: json.RawMessage(inputSchemaJSON),
 	}
@@ -133,7 +137,7 @@ const inputSchemaJSON = `{
               "filename": {"type": "string", "description": "attachment name shown to the recipient; defaults to the s3_key base name (required for content_b64)"},
               "content_b64": {"type": "string", "description": "base64-encoded attachment content (mutually exclusive with s3_key)"},
               "content_type": {"type": "string", "description": "MIME type; guessed from filename when empty"},
-              "s3_key": {"type": "string", "description": "object key in the configured bucket; mutually exclusive with content_b64"}
+              "s3_key": {"type": "string", "description": "object key (or full object-store URL) in the configured bucket; mutually exclusive with content_b64"}
             }
           }
         },
