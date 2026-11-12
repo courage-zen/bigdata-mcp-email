@@ -134,7 +134,7 @@ func TestServer_HealthEndpoint(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 || !strings.Contains(string(b), `"s3":"not-configured"`) {
+	if resp.StatusCode != 200 || string(b) != `{"status":"ok","s3":"not-configured"}` {
 		t.Fatalf("health = %d %s", resp.StatusCode, b)
 	}
 
@@ -152,7 +152,7 @@ func TestServer_HealthEndpoint(t *testing.T) {
 	}
 	defer resp2.Body.Close()
 	b2, _ := io.ReadAll(resp2.Body)
-	if resp2.StatusCode != 200 || !strings.Contains(string(b2), `"s3":"configured"`) {
+	if resp2.StatusCode != 200 || string(b2) != `{"status":"ok","s3":"configured"}` {
 		t.Fatalf("health with store = %d %s", resp2.StatusCode, b2)
 	}
 }
