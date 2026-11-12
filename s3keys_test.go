@@ -193,7 +193,8 @@ func TestResolveInputKey_WrongBucket(t *testing.T) {
 func TestHasDangerousExtension(t *testing.T) {
 	for _, name := range []string{
 		"evil.exe", "evil.EXE", "evil.exe.", "evil.exe...", "evil.CMD.",
-		"payload.dll", "tool.app", "archive.tar.gz.exe",
+		"evil.exe ", "evil.exe. ", "payload.dll", "tool.app",
+		"archive.tar.gz.exe",
 	} {
 		if !hasDangerousExtension(name) {
 			t.Errorf("name %q must be flagged", name)

@@ -345,6 +345,10 @@ func resolveAttachment(env *ServerEnv, m map[string]any, i int, limitBytes int64
 		if env.Store == nil {
 			return Attachment{}, fail(errCodeS3Unavailable, "s3 attachments are not configured (set S3_BUCKET / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)")
 		}
+		// Test envs may set a fake Store without Config.S3 (production
+		// gates NewMinioObjectStore on cfg.S3 != nil in main.go); the
+		// empty config validates plain keys and rejects URL forms (no
+		// bucket match).
 		s3cfg := env.Config.S3
 		if s3cfg == nil {
 			s3cfg = &S3Config{}

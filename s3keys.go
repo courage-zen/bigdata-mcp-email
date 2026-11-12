@@ -14,12 +14,12 @@ var dangerousExtensions = []string{
 }
 
 // hasDangerousExtension reports whether name ends with a blocklisted
-// extension, ignoring case and trailing dots (Windows strips them on
-// save, so "evil.exe." lands on disk as "evil.exe"). It is the single
-// implementation of the blocklist-matching rule, shared by key
-// validation and attachment filename checks.
+// extension, ignoring case and trailing dots and spaces (Windows strips
+// both on save, so "evil.exe." and "evil.exe " land on disk as
+// "evil.exe"). It is the single implementation of the blocklist-matching
+// rule, shared by key validation and attachment filename checks.
 func hasDangerousExtension(name string) bool {
-	trimmed := strings.TrimRight(strings.ToLower(name), ".")
+	trimmed := strings.TrimRight(strings.ToLower(name), ". ")
 	for _, ext := range dangerousExtensions {
 		if strings.HasSuffix(trimmed, ext) {
 			return true

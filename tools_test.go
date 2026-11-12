@@ -865,6 +865,19 @@ func TestSendEmail_FilenameDangerousExtension(t *testing.T) {
 	if code, _ := out2["error_code"].(string); code != "INVALID_PARAM_VALUE" {
 		t.Errorf("error_code = %q, want INVALID_PARAM_VALUE", code)
 	}
+
+	// Positive control: a benign explicit filename over s3_key must
+	// succeed, guarding against the convergence check rejecting
+	// everything.
+	out3 := callSendEmail(t, env, http.Header{}, map[string]any{
+		"to": "a@x.com", "subject": "s", "body": "hi",
+		"attachments": []any{map[string]any{
+			"s3_key": "report.xlsx", "filename": "report.pdf",
+		}},
+	})
+	if out3["success"] != true {
+		t.Fatalf("benign explicit filename must be accepted, err: %v", out3["error"])
+	}
 }
 
 func TestSendEmail_FilenameTrailingDotBypass(t *testing.T) {
