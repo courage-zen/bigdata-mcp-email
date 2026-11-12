@@ -31,7 +31,7 @@ type S3Config struct {
 	Region       string
 	AccessKeyID  string
 	SecretKey    string
-	EndpointURL  string // full URL with scheme (AWS_ENDPOINT_URL) or "" = native AWS
+	EndpointURL  string // full URL with scheme (AWS_ENDPOINT_URL); empty = legacy pair or startup error (minio rejects a bare host-less config)
 	Endpoint     string // bare host:port after scheme strip (minio.New wants this)
 	Secure       bool
 	UsePathStyle bool // resolved S3_USE_PATH_STYLE; default inferred (custom endpoint -> true)

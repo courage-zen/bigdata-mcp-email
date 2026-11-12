@@ -82,13 +82,14 @@ S3 attachments are env-only (the S3 usage standard — no YAML section):
 | `AWS_ACCESS_KEY_ID` | yes | static access key |
 | `AWS_SECRET_ACCESS_KEY` | yes | static secret |
 | `S3_REGION` → `AWS_REGION` | no | region; default `us-east-1` |
-| `AWS_ENDPOINT_URL` | no | S3-compatible endpoint (MinIO/R2), full URL; `http://` = plaintext. Empty = native AWS S3 |
-| `S3_USE_PATH_STYLE` | no | `1/true/yes` or `0/false/no`; unset = path-style when `AWS_ENDPOINT_URL` is set, virtual-host otherwise |
+| `AWS_ENDPOINT_URL` | yes | S3-compatible endpoint (MinIO/R2) or AWS regional endpoint, full URL; `http://` = plaintext. An endpoint is required in practice — with none set the server exits at startup (native AWS: `https://s3.<region>.amazonaws.com`) |
+| `S3_USE_PATH_STYLE` | no | `1/true/yes` or `0/false/no`; unset = path-style when any endpoint is set (standard or legacy), virtual-host otherwise |
 | `S3_KEY_PREFIXES` | no | comma-separated key-prefix allowlist, segment-boundary match; empty = whole bucket |
-| `S3_MAX_FILE_BYTES` | no | S3 transport read cap, default 100 MiB |
+| `S3_MAX_FILE_BYTES` | no | S3 transport read cap in bytes (raw integer, e.g. `104857600`); default 100 MiB |
 
 Missing any required variable disables S3 attachments (`S3_UNAVAILABLE` per
-call, `/health` reports `"not-configured"`); the server still starts. The
+call, `/health` reports `"not-configured"`); the server still starts — but a
+present-yet-invalid `AWS_ENDPOINT_URL` is a startup error, not a soft disable. The
 legacy names `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_ENDPOINT` +
 `S3_SECURE` remain readable for one version (standard names win); the yaml
 `s3:` section is ignored.
