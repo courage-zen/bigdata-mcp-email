@@ -83,8 +83,71 @@ func newTestObjectStore(t *testing.T, s3Cap int64) *MinioObjectStore {
 	return store
 }
 
+// newTestObjectStoreURL is newTestObjectStore for the standard
+// AWS_ENDPOINT_URL form: cfg carries only the full URL (host extracted,
+// scheme http -> Secure false); the legacy pair stays empty to pin that
+// EndpointURL alone is sufficient.
+func newTestObjectStoreURL(t *testing.T, s3Cap int64) *MinioObjectStore {
+	t.Helper()
+	ts := httptest.NewServer(fakeS3Handler(t))
+	t.Cleanup(ts.Close)
+	cfg := &S3Config{
+		Bucket:       "multica-artifacts",
+		Region:       "us-east-1",
+		AccessKeyID:  "AK",
+		SecretKey:    "SK",
+		EndpointURL:  ts.URL,
+		MaxFileBytes: s3Cap,
+	}
+	store, err := NewMinioObjectStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// TestNewMinioObjectStore_BadEndpointURL pins that malformed
+// AWS_ENDPOINT_URL values fail construction (startup fatal) rather than
+// producing a silently misconfigured client.
+func TestNewMinioObjectStore_BadEndpointURL(t *testing.T) {
+	for name, raw := range map[string]string{
+		"no scheme or host": "nohost",
+		"missing protocol":  "://bad",
+	} {
+		_, err := NewMinioObjectStore(&S3Config{
+			Bucket:       "multica-artifacts",
+			Region:       "us-east-1",
+			AccessKeyID:  "AK",
+			SecretKey:    "SK",
+			EndpointURL:  raw,
+			MaxFileBytes: 1 << 20,
+		})
+		if err == nil {
+			t.Errorf("%s: NewMinioObjectStore(%q) err = nil, want error", name, raw)
+			continue
+		}
+		if msg := err.Error(); msg == "" {
+			t.Errorf("%s: empty error message", name)
+		}
+	}
+}
+
 func TestObjectStore_Get_OK(t *testing.T) {
 	store := newTestObjectStore(t, 1<<20)
+	data, err := store.Get("ok/5", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 5 {
+		t.Fatalf("len = %d, want 5", len(data))
+	}
+}
+
+// TestObjectStore_Get_EndpointURLOK mirrors TestObjectStore_Get_OK through
+// the standard AWS_ENDPOINT_URL config form (scheme-derived Secure, host
+// extracted from the URL) instead of the legacy Endpoint/Secure pair.
+func TestObjectStore_Get_EndpointURLOK(t *testing.T) {
+	store := newTestObjectStoreURL(t, 1<<20)
 	data, err := store.Get("ok/5", 1024)
 	if err != nil {
 		t.Fatal(err)

@@ -49,7 +49,8 @@ type MinioObjectStore struct {
 
 // NewMinioObjectStore builds a store from the resolved S3Config: the
 // standard endpoint (full URL, scheme picks Secure) or the legacy bare
-// host:port + Secure flag. Layered timeouts are pinned on the transport
+// host:port + Secure pair; EndpointURL, when set, takes precedence over
+// the legacy pair. Layered timeouts are pinned on the transport
 // (10s dial, 60s response header); Region is always set (skips minio-go's
 // bucket-location probe); UsePathStyle forces the bucket addressing mode,
 // defaulting to minio-go's auto inference (path-style for custom
@@ -117,7 +118,7 @@ func (s *MinioObjectStore) Get(key string, limit int64) ([]byte, error) {
 	// Metadata precheck: refuse before streaming.
 	info, err := s.client.StatObject(ctx, s.bucket, key, minio.StatObjectOptions{})
 	if err != nil {
-		return nil, s.mapError("stat", key, err)
+		return nil, mapError("stat", key, err)
 	}
 	if info.Size > s.maxBytes {
 		return nil, ErrObjectTooLarge
@@ -128,7 +129,7 @@ func (s *MinioObjectStore) Get(key string, limit int64) ([]byte, error) {
 
 	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
-		return nil, s.mapError("get", key, err)
+		return nil, mapError("get", key, err)
 	}
 	defer obj.Close()
 
@@ -140,7 +141,7 @@ func (s *MinioObjectStore) Get(key string, limit int64) ([]byte, error) {
 	}
 	data, err := io.ReadAll(io.LimitReader(obj, maxRead+1))
 	if err != nil {
-		return nil, s.mapError("get", key, err)
+		return nil, mapError("get", key, err)
 	}
 	if int64(len(data)) > maxRead {
 		if limit < s.maxBytes {
@@ -155,7 +156,7 @@ func (s *MinioObjectStore) Get(key string, limit int64) ([]byte, error) {
 // surfaced to callers are sanitized: the minio error Code (e.g.
 // "NoSuchKey", "AccessDenied") is safe to include; the raw error text is
 // not (it embeds bucket/key/endpoint). The raw error goes to the log.
-func (s *MinioObjectStore) mapError(stage, key string, err error) error {
+func mapError(stage, key string, err error) error {
 	resp := minio.ToErrorResponse(err)
 	if resp.Code == "NoSuchKey" || resp.Code == "NoSuchObject" {
 		return fmt.Errorf("%w", ErrObjectNotFound)
