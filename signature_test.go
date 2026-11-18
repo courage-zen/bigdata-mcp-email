@@ -4,6 +4,13 @@ import "testing"
 
 func TestAppendAgentSignature(t *testing.T) {
 	both := map[string]string{"agent_name": "Bob", "workspace_name": "Acme"}
+	// full adds the caller identity needed for the 发起人 line.
+	full := map[string]string{
+		"agent_name":     "Bob",
+		"workspace_name": "Acme",
+		"user_name":      "张三",
+		"user_email":     "zhang@example.com",
+	}
 
 	cases := []struct {
 		name     string
@@ -25,6 +32,32 @@ func TestAppendAgentSignature(t *testing.T) {
 			bodyType: "html",
 			mc:       both,
 			want:     "<p>hi</p>\n<br>--<br>\n智能体：Bob\n<br>工作区：Acme\n<br>",
+		},
+		{
+			name:     "text body, user name and email present",
+			body:     "hi",
+			bodyType: "text",
+			mc:       full,
+			want:     "hi\n\n--\n智能体：Bob\n发起人：张三（zhang@example.com）\n工作区：Acme",
+		},
+		{
+			name:     "html body, user name and email present",
+			body:     "<p>hi</p>",
+			bodyType: "html",
+			mc:       full,
+			want:     "<p>hi</p>\n<br>--<br>\n智能体：Bob\n<br>发起人：张三（zhang@example.com）\n<br>工作区：Acme\n<br>",
+		},
+		{
+			name: "text body, user name missing",
+			body: "hi", bodyType: "text",
+			mc:   map[string]string{"agent_name": "Bob", "workspace_name": "Acme", "user_email": "zhang@example.com"},
+			want: "hi\n\n--\n智能体：Bob\n工作区：Acme",
+		},
+		{
+			name: "text body, user email missing",
+			body: "hi", bodyType: "text",
+			mc:   map[string]string{"agent_name": "Bob", "workspace_name": "Acme", "user_name": "张三"},
+			want: "hi\n\n--\n智能体：Bob\n工作区：Acme",
 		},
 		{
 			name:     "text body, missing workspace_name",

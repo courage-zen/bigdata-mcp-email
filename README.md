@@ -12,7 +12,9 @@ multica agent → multica-stdio-mcp-proxy → email-mcp :8000/mcp → local-smtp
 - `X-Multica-*` headers are echoed in the tool result as `multica_context`
 - Agent signature: when `X-Multica-Agent-Name` and `X-Multica-Workspace-Name`
   are both present, an attribution block identifying the agent and workspace
-  is appended to the body; the tool result reports it via `signature_appended`
+  (plus the initiating user, when `X-Multica-User-Name` and
+  `X-Multica-User-Email` are also present) is appended to the body; the tool
+  result reports it via `signature_appended`
 
 ## Install
 
@@ -42,14 +44,14 @@ docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=noreply@example.co
 Or pull the image from GHCR:
 
 ```sh
-docker pull ghcr.io/courage-zen/bigdata-mcp-email:v0.3.0
+docker pull ghcr.io/courage-zen/bigdata-mcp-email:v0.3.2
 ```
 
 Or download a per-arch image tar.gz from [Releases](https://github.com/courage-zen/bigdata-mcp-email/releases) and load it — no registry access needed (air-gapped path):
 
 ```sh
-docker load -i email-mcp-image-v0.3.0-linux-arm64.tar.gz
-docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=you@example.com email-mcp:v0.3.0-arm64
+docker load -i email-mcp-image-v0.3.2-linux-arm64.tar.gz
+docker run -p 8000:8000 -e MCP_AUTH_KEY=your-key -e SMTP_FROM=you@example.com email-mcp:v0.3.2-arm64
 ```
 
 ## Configure
@@ -181,10 +183,13 @@ non-empty value, this block is appended to the end of the body:
 ```text
 --
 智能体：{agent_name}
+发起人：{user_name}（{user_email}）
 工作区：{workspace_name}
 ```
 
-html bodies get the same lines with `<br>` breaks. Otherwise the body is sent
+The `发起人` line appears only when both `X-Multica-User-Name` and
+`X-Multica-User-Email` are present; otherwise it is omitted. html bodies get
+the same lines with `<br>` breaks. Otherwise the body is sent
 unchanged and `signature_appended` is `false`.
 
 ## Deployment (k8s sidecar)
