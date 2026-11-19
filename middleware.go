@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -12,10 +13,10 @@ import (
 // only) fails closed: every request 401s instead of silently disabling auth.
 // /health is exempt.
 func bearerAuth(keys string, next http.Handler) http.Handler {
-	allowed := map[string]bool{}
+	var keyList []string
 	for _, k := range strings.Split(keys, ",") {
 		if k = strings.TrimSpace(k); k != "" {
-			allowed[k] = true
+			keyList = append(keyList, k)
 		}
 	}
 	authDisabled := keys == ""
@@ -26,7 +27,7 @@ func bearerAuth(keys string, next http.Handler) http.Handler {
 		}
 		h := r.Header.Get("Authorization")
 		const prefix = "Bearer "
-		if !strings.HasPrefix(h, prefix) || !allowed[strings.TrimSpace(h[len(prefix):])] {
+		if !strings.HasPrefix(h, prefix) || !keyMatch(keyList, strings.TrimSpace(h[len(prefix):])) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{
@@ -37,4 +38,20 @@ func bearerAuth(keys string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// keyMatch compares the presented token against every configured key in
+// constant time (subtle.ConstantTimeCompare). The previous map lookup was
+// timing-sensitive: map hashing short-circuits on the first differing byte,
+// leaking prefix matches via response latency. Length is compared first and
+// is not secret — only byte equality needs constant-time guarantees.
+func keyMatch(keys []string, presented string) bool {
+	match := 0
+	for _, k := range keys {
+		if len(k) != len(presented) {
+			continue
+		}
+		match |= subtle.ConstantTimeCompare([]byte(k), []byte(presented))
+	}
+	return match == 1
 }

@@ -311,3 +311,38 @@ func TestServer_InvalidParamRejectedBySchema(t *testing.T) {
 		t.Fatalf("expected SDK validation error text: %.300s", resp)
 	}
 }
+
+// TestServer_MultiKeyAuth pins comma-separated MCP_AUTH_KEY semantics: every
+// listed key authenticates, wrong keys 401 — exercised through keyMatch since
+// the constant-time rework replaced the map lookup.
+func TestServer_MultiKeyAuth(t *testing.T) {
+	fs := &fakeSender{}
+	ts := httptest.NewServer(newTestHTTPServer(t, "key-one,key-two", fs))
+	defer ts.Close()
+
+	for _, key := range []string{"key-one", "key-two"} {
+		status, body := mcpCall(t, ts.URL, map[string]string{"Authorization": "Bearer " + key}, callBody)
+		if status != 200 {
+			t.Fatalf("key %q: status = %d: %s", key, status, body)
+		}
+	}
+	status, _ := mcpCall(t, ts.URL, map[string]string{"Authorization": "Bearer key-three"}, callBody)
+	if status != 401 {
+		t.Fatalf("unknown key: status = %d, want 401", status)
+	}
+}
+
+// TestKeyMatch pins the constant-time comparator's functional surface:
+// exact match true; wrong key, prefix of a key, longer-than-key token all
+// false (length equalization must not create accidental matches).
+func TestKeyMatch(t *testing.T) {
+	keys := []string{"alpha", "beta"}
+	if !keyMatch(keys, "alpha") || !keyMatch(keys, "beta") {
+		t.Fatal("exact keys must match")
+	}
+	for _, bad := range []string{"alph", "alphabet", "alpha\x00", "gamma", ""} {
+		if keyMatch(keys, bad) {
+			t.Fatalf("keyMatch(%q) = true, want false", bad)
+		}
+	}
+}
